@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AdSignage Studio</title>
+  <meta name="description" content="Studio de edição profissional para sinalização digital" />
+
+  <!-- PWA -->
+  <meta name="theme-color" content="#0d1117" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="ide">
+    <!-- Barra de título / menu -->
+    <header class="titlebar">
+      <div class="win-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+      <nav class="menu" id="menu"></nav>
+      <div class="title-center" id="title-center">AdSignage Studio</div>
+      <div class="title-actions">
+        <button class="cmd-open" id="cmd-open" title="Paleta de comandos (Ctrl+K)">
+          <span id="cmd-open-icon"></span><span>Comandos</span><kbd>Ctrl K</kbd>
+        </button>
+      </div>
+    </header>
+
+    <!-- Corpo -->
+    <div class="body">
+      <nav class="activitybar" id="activitybar" aria-label="Seções"></nav>
+      <aside class="sidebar" id="sidebar"></aside>
+
+      <section class="editor">
+        <div class="tabsbar" id="tabsbar"></div>
+        <div class="stage-wrap" id="stage-wrap">
+          <div class="stage" id="stage"></div>
+          <div class="stage-hint" id="stage-hint"></div>
+        </div>
+        <div class="bottompanel">
+          <div class="bottom-tabs" id="bottom-tabs"></div>
+          <div class="bottom-content" id="bottom-content"></div>
+        </div>
+      </section>
+
+      <aside class="inspector" id="inspector"></aside>
+    </div>
+
+    <!-- Barra de status -->
+    <footer class="statusbar" id="statusbar"></footer>
+  </div>
+
+  <!-- Paleta de comandos -->
+  <div class="palette-overlay" id="palette" hidden>
+    <div class="palette">
+      <input id="palette-input" type="text" placeholder="Digite um comando ou busque..." autocomplete="off" />
+      <ul id="palette-list"></ul>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
