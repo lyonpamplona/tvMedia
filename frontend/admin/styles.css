@@ -337,6 +337,26 @@ kbd {
 #palette-list li.active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 #palette-list li.active .pi { color: var(--accent); }
 
+/* ----------------------------- Onboarding ----------------------- */
+.onboard-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 300; }
+.onboard-card { width: 100%; max-width: 460px; background: var(--elev); border: 1px solid var(--border-2); border-radius: 16px; box-shadow: var(--shadow); padding: 26px 26px 20px; display: flex; flex-direction: column; gap: 16px; animation: onboard-in .25s ease; }
+@keyframes onboard-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+.onboard-figure { width: 64px; height: 64px; border-radius: 14px; display: grid; place-items: center; color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.onboard-figure svg { width: 32px; height: 32px; stroke-width: 1.8; }
+.onboard-body { display: flex; flex-direction: column; gap: 8px; }
+.onboard-step { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+.onboard-body h2 { margin: 0; font-size: 19px; color: var(--fg-strong); line-height: 1.3; }
+.onboard-body p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--muted); }
+.onboard-dots { display: flex; gap: 7px; }
+.onboard-dots .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-2); cursor: pointer; transition: background .15s, transform .15s; }
+.onboard-dots .dot.on { background: var(--accent); transform: scale(1.25); }
+.onboard-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; }
+.onboard-nav { display: flex; gap: 8px; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+.btn.ghost:hover { color: var(--fg); }
+.btn:disabled { opacity: .4; cursor: default; }
+@media (max-width: 520px) { .onboard-card { padding: 20px; } .onboard-body h2 { font-size: 17px; } .onboard-actions { flex-direction: column-reverse; align-items: stretch; } .onboard-nav { justify-content: space-between; } }
+
 /* ------------------------------ Toasts -------------------------- */
 .toast-stack { position: fixed; right: 16px; bottom: 38px; display: flex; flex-direction: column; gap: 10px; z-index: 200; max-width: 340px; }
 .toast {
