@@ -1,653 +1,667 @@
 /**
- * AdSignage — Painel administrativo (v2).
+ * AdSignage Studio - painel de edicao profissional (estilo IDE) para
+ * sinalizacao digital, conectado a API real do backend.
  *
- * Funcionalidades:
- *  - Autenticação por senha (token de sessão armazenado em localStorage).
- *  - Gestão de mídias (upload de imagem/vídeo, criação de texto/HTML/URL).
- *  - Gestão de playlists e itens (com duração, ajuste/fit e transição).
- *  - Gestão de telas, zonas (layout em %) e agendamentos por horário/dia.
+ * Layout: barra de titulo + menu, barra de atividades, explorer em arvore,
+ * editor com documentos por secao (canvas de telas/zonas arrastaveis,
+ * biblioteca de midias, editor de playlists, tabela de agendamentos),
+ * inspetor de propriedades contextual, painel inferior (linha do tempo,
+ * saida e problemas), barra de status, paleta de comandos (Ctrl+K) e toasts.
  *
- * Todas as chamadas à API passam pelo wrapper `api()`, que injeta o token e
- * trata expiração de sessão (401 -> volta para a tela de login).
+ * Todos os icones sao SVG (sem emojis). As alteracoes sao aplicadas ao vivo:
+ * o player consome /api/display/{slug} e reage via WebSocket no backend.
  */
-
 (() => {
   "use strict";
 
+  // ----------------------------- Icones SVG ------------------------ //
+  const S = (p, vb) => "<svg viewBox=\"" + (vb || "0 0 24 24") + "\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">" + p + "</svg>";
+  const ICONS = {
+    logo: S('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M9 16v4M15 16v4M7 9h4"/>'),
+    layout: S('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>'),
+    media: S('<rect x="3" y="4" width="18" height="14" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m21 15-5-5L5 18"/>'),
+    playlist: S('<path d="M3 6h13M3 12h9M3 18h9"/><circle cx="18" cy="16" r="3"/>'),
+    screen: S('<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>'),
+    clock: S('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+    search: S('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>'),
+    settings: S('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'),
+    chevron: S('<path d="m6 9 6 6 6-6"/>'),
+    plus: S('<path d="M12 5v14M5 12h14"/>'),
+    refresh: S('<path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/>'),
+    close: S('<path d="M18 6 6 18M6 6l12 12"/>'),
+    image: S('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>'),
+    video: S('<rect x="2" y="5" width="14" height="14" rx="2"/><path d="m16 9 6-3v12l-6-3"/>'),
+    text: S('<path d="M4 6h16M4 12h16M4 18h10"/>'),
+    code: S('<path d="m8 6-6 6 6 6M16 6l6 6-6 6"/>'),
+    link: S('<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>'),
+    youtube: S('<rect x="2" y="5" width="20" height="14" rx="4"/><path d="m10 9 5 3-5 3z" fill="currentColor" stroke="none"/>'),
+    music: S('<circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/><path d="M9 18V5l12-2v13"/>'),
+    timeline: S('<path d="M3 12h18M6 8v8M12 6v12M18 9v6"/>'),
+    terminal: S('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>'),
+    alert: S('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>'),
+    check: S('<path d="M20 6 9 17l-5-5"/>'),
+    info: S('<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>'),
+    eye: S('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>'),
+    copy: S('<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'),
+    trash: S('<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>'),
+    sun: S('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M5 5l1.5 1.5M17.5 17.5 19 19M2 12h2M20 12h2M5 19l1.5-1.5M17.5 6.5 19 5"/>'),
+    branch: S('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 3-4 2.5-4 6.5"/>'),
+    wifi: S('<path d="M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0M12 19h.01"/>'),
+    up: S('<path d="m18 15-6-6-6 6"/>'),
+    down: S('<path d="m6 9 6 6 6-6"/>'),
+    power: S('<path d="M12 2v10M18.4 6.6a9 9 0 1 1-12.8 0"/>'),
+    upload: S('<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>'),
+  };
+
+  const TYPE_ICON = { image: "image", video: "video", text: "text", html: "code", url: "link", youtube: "youtube", embed: "music" };
+  const TYPE_LABEL = { image: "Imagem", video: "Video", text: "Texto", html: "HTML", url: "URL", youtube: "YouTube", embed: "Embed" };
+  const FITS = ["contain", "cover", "fill"];
+  const TRANSITIONS = ["none", "fade", "slide"];
+  const DAYS = ["S", "T", "Q", "Q", "S", "S", "D"];
+  const DAYS_FULL = ["Segunda", "Terca", "Quarta", "Quinta", "Sexta", "Sabado", "Domingo"];
+
+  // ------------------------------ Estado --------------------------- //
   const TOKEN_KEY = "adsignage_token";
-  /** @type {string|null} Token de sessão atual. */
   let token = localStorage.getItem(TOKEN_KEY);
+  let isDragging = false;
 
-  // Elementos principais.
-  const loginView = document.getElementById("login");
-  const appView = document.getElementById("app");
-  const toastEl = document.getElementById("toast");
+  const state = {
+    media: [],
+    playlists: [],
+    screens: [],
+    activeSection: "screens",
+    activeScreenId: null,
+    selectedZoneId: null,
+    selectedMediaId: null,
+    openPlaylistId: null,
+    bottomTab: "timeline",
+  };
 
-  // ----------------------------------------------------------------- //
-  // Utilidades
-  // ----------------------------------------------------------------- //
+  const $ = (id) => document.getElementById(id);
+  const screen = () => state.screens.find((s) => s.id === state.activeScreenId) || null;
+  const zone = () => { const s = screen(); return s ? s.zones.find((z) => z.id === state.selectedZoneId) || null : null; };
+  const playlistById = (id) => state.playlists.find((p) => p.id === id) || null;
+  const mediaById = (id) => state.media.find((m) => m.id === id) || null;
+  const esc = (v) => { const d = document.createElement("div"); d.textContent = v == null ? "" : String(v); return d.innerHTML; };
+  const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+  const isOnline = (s) => !!(s.last_seen && (Date.now() - new Date(s.last_seen).getTime() < 60000));
+  const minToHHMM = (m) => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+  const hhmmToMin = (v) => { const parts = (v || "0:0").split(":").map(Number); return (parts[0] || 0) * 60 + (parts[1] || 0); };
+  const playerUrl = (slug) => location.origin + "/player/?screen=" + slug;
 
+  // ------------------------------- API ----------------------------- //
   /**
-   * Exibe uma notificação temporária (toast).
-   * @param {string} message Mensagem a exibir.
-   * @param {"info"|"success"|"error"} [type="info"] Estilo do toast.
+   * Wrapper de fetch que injeta o token e trata 401 (sessao expirada).
+   * @param {string} path Caminho relativo da API.
+   * @param {RequestInit} [options] Opcoes do fetch.
+   * @returns {Promise<any>} Corpo JSON (ou null em 204).
    */
-  function toast(message, type = "info") {
-    toastEl.textContent = message;
-    toastEl.className = `toast show ${type}`;
-    setTimeout(() => (toastEl.className = "toast"), 3000);
-  }
-
-  /**
-   * Wrapper de fetch para a API, injetando o token e tratando erros comuns.
-   * @param {string} path Caminho relativo (ex.: "/api/media").
-   * @param {RequestInit} [options={}] Opções do fetch.
-   * @returns {Promise<any>} Corpo JSON da resposta (ou null em 204).
-   */
-  async function api(path, options = {}) {
-    const headers = options.headers ? { ...options.headers } : {};
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    if (options.body && !(options.body instanceof FormData)) {
-      headers["Content-Type"] = "application/json";
-    }
-    const resp = await fetch(path, { ...options, headers });
-    if (resp.status === 401) {
-      logout();
-      throw new Error("Sessão expirada. Faça login novamente.");
-    }
+  async function api(path, options) {
+    options = options || {};
+    const headers = options.headers ? Object.assign({}, options.headers) : {};
+    if (token) headers["Authorization"] = "Bearer " + token;
+    if (options.body && !(options.body instanceof FormData)) headers["Content-Type"] = "application/json";
+    const resp = await fetch(path, Object.assign({}, options, { headers }));
+    if (resp.status === 401) { logout(); throw new Error("Sessao expirada. Entre novamente."); }
     if (!resp.ok) {
-      let detail = `Erro ${resp.status}`;
-      try { detail = (await resp.json()).detail || detail; } catch { /* ignore */ }
+      let detail = "Erro " + resp.status;
+      try { const j = await resp.json(); detail = j.detail || detail; } catch (e) { /* ignore */ }
       throw new Error(detail);
     }
     return resp.status === 204 ? null : resp.json();
   }
 
+  async function loadMedia() { state.media = await api("/api/media"); }
+  async function loadPlaylists() { state.playlists = await api("/api/playlists"); }
+  async function loadScreens() { state.screens = await api("/api/screens"); }
+
+  /** Carrega todos os dados e renderiza o painel. */
+  async function loadAll() {
+    try {
+      await Promise.all([loadMedia(), loadPlaylists(), loadScreens()]);
+      fixSelection();
+      renderAll();
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+
+  /** Garante que as selecoes apontem para entidades existentes. */
+  function fixSelection() {
+    if (!screen()) state.activeScreenId = state.screens[0] ? state.screens[0].id : null;
+    const s = screen();
+    if (s && !zone()) state.selectedZoneId = s.zones[0] ? s.zones[0].id : null;
+    if (!playlistById(state.openPlaylistId)) state.openPlaylistId = state.playlists[0] ? state.playlists[0].id : null;
+  }
+
+  // ------------------------------ Toasts --------------------------- //
   /**
-   * Escapa texto para inserção segura como HTML.
-   * @param {unknown} value Valor a escapar.
-   * @returns {string} Texto escapado.
+   * Exibe um toast empilhado.
+   * @param {string|{kind?:string,title?:string,msg?:string,timeout?:number}} opts
    */
-  function esc(value) {
-    const div = document.createElement("div");
-    div.textContent = value == null ? "" : String(value);
-    return div.innerHTML;
+  function toast(opts) {
+    const o = typeof opts === "string" ? { msg: opts } : opts;
+    const kind = o.kind || "info";
+    const ico = ({ ok: "check", info: "info", warn: "alert", err: "alert" })[kind] || "info";
+    const title = o.title || ({ ok: "Sucesso", info: "Informacao", warn: "Atencao", err: "Erro" })[kind];
+    const el = document.createElement("div");
+    el.className = "toast " + kind;
+    el.innerHTML = '<span class="tico">' + ICONS[ico] + '</span><div class="tbody"><div class="ttitle">' + esc(title) + '</div><div class="tmsg">' + esc(o.msg || "") + '</div></div><button class="tclose">' + ICONS.close + '</button>';
+    $("toast-stack").appendChild(el);
+    requestAnimationFrame(() => el.classList.add("show"));
+    const kill = () => { el.classList.remove("show"); setTimeout(() => el.remove(), 300); };
+    el.querySelector(".tclose").addEventListener("click", kill);
+    setTimeout(kill, o.timeout || 3200);
   }
 
-  // ----------------------------------------------------------------- //
-  // Autenticação
-  // ----------------------------------------------------------------- //
+  // ---------------------------- Atividades ------------------------- //
+  const SECTIONS = [
+    { id: "screens", label: "Telas", icon: "screen" },
+    { id: "media", label: "Midias", icon: "media" },
+    { id: "playlists", label: "Playlists", icon: "playlist" },
+    { id: "schedules", label: "Agendamentos", icon: "clock" },
+  ];
 
-  /** Mostra a aplicação e carrega os dados iniciais. */
-  function showApp() {
-    loginView.classList.add("hidden");
-    appView.classList.remove("hidden");
-    loadMedia();
-    loadPlaylists();
-    loadScreens();
+  function renderActivity() {
+    const bar = $("activitybar");
+    bar.innerHTML = SECTIONS.map((s) => '<button class="act ' + (s.id === state.activeSection ? "active" : "") + '" data-sec="' + s.id + '" title="' + s.label + '">' + ICONS[s.icon] + '</button>').join("") +
+      '<div class="spacer"></div>' +
+      '<button class="act" data-act="theme" title="Alternar tema">' + ICONS.sun + '</button>' +
+      '<button class="act" data-act="settings" title="Configuracoes">' + ICONS.settings + '</button>';
+    bar.querySelectorAll("[data-sec]").forEach((b) => b.addEventListener("click", () => { state.activeSection = b.dataset.sec; renderActivity(); renderSidebar(); renderTabs(); renderDoc(); renderInspector(); renderBottom(); }));
+    bar.querySelector('[data-act="theme"]').addEventListener("click", toggleTheme);
+    bar.querySelector('[data-act="settings"]').addEventListener("click", () => toast({ kind: "info", title: "Configuracoes", msg: "Tema, PWA e sessao ficam na barra de atividades e titulo." }));
   }
 
-  /** Encerra a sessão e volta à tela de login. */
-  function logout() {
-    token = null;
-    localStorage.removeItem(TOKEN_KEY);
-    appView.classList.add("hidden");
-    loginView.classList.remove("hidden");
+  function renderMenu() {
+    const items = ["Projeto", "Editar", "Visualizar", "Ajuda"];
+    $("menu").innerHTML = items.map((m) => '<button data-menu="' + m + '">' + m + '</button>').join("");
+    $("menu").querySelectorAll("[data-menu]").forEach((b) => b.addEventListener("click", () => openPalette()));
   }
 
-  document.getElementById("login-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const password = document.getElementById("login-password").value;
-    const errorEl = document.getElementById("login-error");
-    errorEl.textContent = "";
-    try {
-      const data = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
-      });
-      if (!data.ok) throw new Error("Senha incorreta.");
-      const json = await data.json();
-      token = json.token;
-      localStorage.setItem(TOKEN_KEY, token);
-      showApp();
-    } catch (err) {
-      errorEl.textContent = err.message;
+  // ----------------------------- Sidebar --------------------------- //
+  function sideHead(title, actions) {
+    return '<div class="side-head"><span>' + title + '</span><span class="acts">' + (actions || []).map((a) => '<button data-side-act="' + a.act + '" title="' + a.title + '">' + ICONS[a.icon] + '</button>').join("") + '</span></div>';
+  }
+
+  function renderSidebar() {
+    const sb = $("sidebar");
+    if (state.activeSection === "screens") {
+      sb.innerHTML = sideHead("Telas", [{ act: "add-screen", icon: "plus", title: "Nova tela" }, { act: "reload", icon: "refresh", title: "Recarregar" }]) +
+        '<div class="tree"><div class="tree-group"><div class="tree-label" data-toggle><span class="chev">' + ICONS.chevron + '</span><span>Dispositivos</span></div><div class="tree-children">' +
+        (state.screens.length ? state.screens.map((s) => '<div class="tree-item ' + (s.id === state.activeScreenId ? "active" : "") + '" data-screen="' + s.id + '"><span class="dot ' + (isOnline(s) ? "on" : "off") + '"></span><span class="name">' + esc(s.name) + '</span><span class="tag">' + s.zones.length + 'z</span></div>').join("") : '<div class="empty">Nenhuma tela.</div>') +
+        '</div></div></div>';
+    } else if (state.activeSection === "media") {
+      sb.innerHTML = sideHead("Midias", [{ act: "reload", icon: "refresh", title: "Recarregar" }]) +
+        '<div class="tree">' + (state.media.length ? state.media.map((m) => '<div class="tree-item ' + (m.id === state.selectedMediaId ? "active" : "") + '" data-media="' + m.id + '">' + ICONS[TYPE_ICON[m.type]] + '<span class="name">' + esc(m.name) + '</span><span class="tag">' + TYPE_LABEL[m.type] + '</span></div>').join("") : '<div class="empty">Nenhuma midia.</div>') + '</div>';
+    } else if (state.activeSection === "playlists") {
+      sb.innerHTML = sideHead("Playlists", [{ act: "add-playlist", icon: "plus", title: "Nova playlist" }, { act: "reload", icon: "refresh", title: "Recarregar" }]) +
+        '<div class="tree">' + (state.playlists.length ? state.playlists.map((p) => '<div class="tree-item ' + (p.id === state.openPlaylistId ? "active" : "") + '" data-playlist="' + p.id + '">' + ICONS.playlist + '<span class="name">' + esc(p.name) + '</span><span class="tag">' + p.items.length + '</span></div>').join("") : '<div class="empty">Nenhuma playlist.</div>') + '</div>';
+    } else {
+      const rows = [];
+      state.screens.forEach((s) => s.zones.forEach((z) => z.schedules.forEach((sc) => {
+        const pl = playlistById(sc.playlist_id);
+        rows.push('<div class="tree-item" data-sched-screen="' + s.id + '"><span class="name">' + esc((pl ? pl.name : "?")) + '</span><span class="tag">' + minToHHMM(sc.start_minute) + '</span></div>');
+      })));
+      sb.innerHTML = sideHead("Agendamentos") + '<div class="tree">' + (rows.join("") || '<div class="empty">Nenhum agendamento. Crie no inspetor de uma zona.</div>') + '</div>';
     }
-  });
-
-  document.getElementById("logout").addEventListener("click", logout);
-
-  // ----------------------------------------------------------------- //
-  // Navegação por abas
-  // ----------------------------------------------------------------- //
-  document.querySelectorAll(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-      document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
-      tab.classList.add("active");
-      document.getElementById(`tab-${tab.dataset.tab}`).classList.add("active");
-    });
-  });
-
-  // ----------------------------------------------------------------- //
-  // Mídias
-  // ----------------------------------------------------------------- //
-  /** @type {Array<Object>} Cache das mídias carregadas. */
-  let mediaCache = [];
-
-  /** Carrega e renderiza a lista de mídias. */
-  async function loadMedia() {
-    try {
-      mediaCache = await api("/api/media");
-      renderMedia();
-    } catch (err) { toast(err.message, "error"); }
+    bindSidebar();
   }
 
-  /** Renderiza os cards de mídia. */
-  function renderMedia() {
-    const list = document.getElementById("media-list");
-    if (mediaCache.length === 0) {
-      list.innerHTML = `<p class="muted">Nenhuma mídia cadastrada.</p>`;
-      return;
-    }
-    list.innerHTML = mediaCache.map((m) => {
-      let preview;
-      if (m.type === "image") {
-        preview = `<img class="thumb" src="/media/${esc(m.path)}" alt="" />`;
-      } else if (m.type === "video") {
-        preview = `<video class="thumb" src="/media/${esc(m.path)}" muted></video>`;
-      } else {
-        preview = `<div class="thumb placeholder">${esc(m.type.toUpperCase())}</div>`;
+  function bindSidebar() {
+    const sb = $("sidebar");
+    sb.querySelectorAll("[data-toggle]").forEach((b) => b.addEventListener("click", () => b.closest(".tree-group").classList.toggle("collapsed")));
+    sb.querySelectorAll("[data-screen]").forEach((b) => b.addEventListener("click", () => { state.activeScreenId = Number(b.dataset.screen); const s = screen(); state.selectedZoneId = s && s.zones[0] ? s.zones[0].id : null; renderAll(); }));
+    sb.querySelectorAll("[data-media]").forEach((b) => b.addEventListener("click", () => { state.selectedMediaId = Number(b.dataset.media); renderSidebar(); renderInspector(); }));
+    sb.querySelectorAll("[data-playlist]").forEach((b) => b.addEventListener("click", () => { state.openPlaylistId = Number(b.dataset.playlist); renderSidebar(); renderTabs(); renderDoc(); renderInspector(); renderBottom(); }));
+    sb.querySelectorAll("[data-sched-screen]").forEach((b) => b.addEventListener("click", () => { state.activeSection = "screens"; state.activeScreenId = Number(b.dataset.schedScreen); renderAll(); }));
+    sb.querySelectorAll("[data-side-act]").forEach((b) => b.addEventListener("click", () => handleSideAct(b.dataset.sideAct)));
+  }
+
+  async function handleSideAct(act) {
+    try {
+      if (act === "reload") { await loadAll(); toast({ kind: "info", msg: "Projeto recarregado." }); }
+      else if (act === "add-screen") {
+        const created = await api("/api/screens", { method: "POST", body: JSON.stringify({ name: "Nova TV", timezone: "America/Sao_Paulo" }) });
+        await loadScreens(); state.activeScreenId = created.id; const s = screen(); state.selectedZoneId = s && s.zones[0] ? s.zones[0].id : null; renderAll(); toast({ kind: "ok", msg: "Tela criada." });
+      } else if (act === "add-playlist") {
+        const created = await api("/api/playlists", { method: "POST", body: JSON.stringify({ name: "Nova playlist" }) });
+        await loadPlaylists(); state.openPlaylistId = created.id; renderSidebar(); renderTabs(); renderDoc(); toast({ kind: "ok", msg: "Playlist criada." });
       }
-      return `<div class="card">
-        ${preview}
-        <h3>${esc(m.name)}</h3>
-        <div class="meta">Tipo: ${esc(m.type)}</div>
-        <div class="row between">
-          <span class="badge">#${m.id}</span>
-          <button class="btn danger small" data-del-media="${m.id}">Excluir</button>
-        </div>
-      </div>`;
-    }).join("");
-
-    list.querySelectorAll("[data-del-media]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        if (!confirm("Excluir esta mídia?")) return;
-        try {
-          await api(`/api/media/${btn.dataset.delMedia}`, { method: "DELETE" });
-          toast("Mídia excluída.", "success");
-          loadMedia();
-        } catch (err) { toast(err.message, "error"); }
-      });
-    });
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
   }
 
-  document.getElementById("upload-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const name = document.getElementById("upload-name").value;
-    const file = document.getElementById("upload-file").files[0];
-    if (!file) return;
-    const fd = new FormData();
-    fd.append("name", name);
-    fd.append("file", file);
-    try {
-      await api("/api/media/upload", { method: "POST", body: fd });
-      toast("Mídia enviada.", "success");
-      e.target.reset();
-      loadMedia();
-    } catch (err) { toast(err.message, "error"); }
-  });
-
-  document.getElementById("content-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const name = document.getElementById("content-name").value;
-    const type = document.getElementById("content-type").value;
-    const value = document.getElementById("content-value").value;
-    const body = { name, type };
-    if (["url", "youtube", "embed"].includes(type)) body.source_url = value;
-    else body.content = value;
-    try {
-      await api("/api/media", { method: "POST", body: JSON.stringify(body) });
-      toast("Mídia criada.", "success");
-      e.target.reset();
-      loadMedia();
-    } catch (err) { toast(err.message, "error"); }
-  });
-
-  // ----------------------------------------------------------------- //
-  // Playlists
-  // ----------------------------------------------------------------- //
-  /** @type {Array<Object>} Cache das playlists. */
-  let playlistCache = [];
-  /** @type {number|null} ID da playlist aberta no detalhe. */
-  let openPlaylistId = null;
-
-  /** Carrega e renderiza a lista de playlists. */
-  async function loadPlaylists() {
-    try {
-      playlistCache = await api("/api/playlists");
-      renderPlaylists();
-      if (openPlaylistId) renderPlaylistDetail(openPlaylistId);
-    } catch (err) { toast(err.message, "error"); }
-  }
-
-  /** Renderiza a lista lateral de playlists. */
-  function renderPlaylists() {
-    const list = document.getElementById("playlists-list");
-    if (playlistCache.length === 0) {
-      list.innerHTML = `<p class="muted">Nenhuma playlist.</p>`;
-      return;
+  // ------------------------------- Tabs ---------------------------- //
+  function renderTabs() {
+    const tb = $("tabsbar");
+    if (state.activeSection === "screens") {
+      tb.innerHTML = state.screens.map((s) => '<div class="tab ' + (s.id === state.activeScreenId ? "active" : "") + '" data-tab="' + s.id + '">' + ICONS.screen + '<span>' + esc(s.name) + '</span></div>').join("") || '<div class="tab active">' + ICONS.screen + '<span>Sem telas</span></div>';
+      tb.querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => { state.activeScreenId = Number(b.dataset.tab); const s = screen(); state.selectedZoneId = s && s.zones[0] ? s.zones[0].id : null; renderAll(); }));
+    } else {
+      const map = { media: { i: "media", t: "Biblioteca de midias" }, playlists: { i: "playlist", t: "Editor de playlists" }, schedules: { i: "clock", t: "Agendamentos" } };
+      const m = map[state.activeSection];
+      tb.innerHTML = '<div class="tab active">' + ICONS[m.i] + '<span>' + m.t + '</span></div>';
     }
-    list.innerHTML = playlistCache.map((p) => `
-      <div class="list-item ${p.id === openPlaylistId ? "active" : ""}" data-playlist="${p.id}">
-        <span>${esc(p.name)}</span>
-        <span class="badge">${p.items.length} itens</span>
-      </div>`).join("");
-    list.querySelectorAll("[data-playlist]").forEach((el) => {
-      el.addEventListener("click", () => {
-        openPlaylistId = Number(el.dataset.playlist);
-        renderPlaylists();
-        renderPlaylistDetail(openPlaylistId);
-      });
-    });
+    $("title-center").textContent = screen() ? screen().slug : "";
   }
 
-  /**
-   * Renderiza o painel de detalhe de uma playlist (itens + controles).
-   * @param {number} playlistId ID da playlist a exibir.
-   */
-  function renderPlaylistDetail(playlistId) {
-    const detail = document.getElementById("playlist-detail");
-    const playlist = playlistCache.find((p) => p.id === playlistId);
-    if (!playlist) { detail.innerHTML = `<p class="muted">Playlist removida.</p>`; return; }
-
-    const fitOptions = ["contain", "cover", "fill"];
-    const transOptions = ["fade", "slide", "none"];
-    const mediaOptions = mediaCache
-      .map((m) => `<option value="${m.id}">${esc(m.name)} (${esc(m.type)})</option>`)
-      .join("");
-
-    const itemsHtml = playlist.items.length === 0
-      ? `<p class="muted">Sem itens. Adicione abaixo.</p>`
-      : playlist.items.map((it) => `
-        <div class="item-row">
-          <span class="badge">#${it.position + 1}</span>
-          <span class="grow">${esc(it.media.name)} <span class="muted">(${esc(it.media.type)})</span></span>
-          <label class="field">dur(s)
-            <input type="number" min="1" value="${it.duration}" style="width:70px" data-dur="${it.id}" />
-          </label>
-          <label class="field">ajuste
-            <select data-fit="${it.id}">${fitOptions.map((f) => `<option ${f === it.fit ? "selected" : ""}>${f}</option>`).join("")}</select>
-          </label>
-          <label class="field">transição
-            <select data-trans="${it.id}">${transOptions.map((t) => `<option ${t === it.transition ? "selected" : ""}>${t}</option>`).join("")}</select>
-          </label>
-          <label class="field">som
-            <input type="checkbox" data-mute="${it.id}" ${it.muted ? "" : "checked"} />
-          </label>
-          <button class="btn danger small" data-del-item="${it.id}">x</button>
-        </div>`).join("");
-
-    detail.innerHTML = `
-      <div class="row between">
-        <h3>${esc(playlist.name)}</h3>
-        <div class="row">
-          <button class="btn ghost small" id="rename-playlist">Renomear</button>
-          <button class="btn danger small" id="delete-playlist">Excluir playlist</button>
-        </div>
-      </div>
-      <div>${itemsHtml}</div>
-      <div class="subcard">
-        <h3>Adicionar item</h3>
-        <div class="row">
-          <select id="add-media">${mediaOptions}</select>
-          <input type="number" id="add-duration" min="1" value="10" placeholder="seg" style="width:80px" />
-          <select id="add-fit">${fitOptions.map((f) => `<option>${f}</option>`).join("")}</select>
-          <select id="add-trans">${transOptions.map((t) => `<option>${t}</option>`).join("")}</select>
-          <label class="field">som <input type="checkbox" id="add-mute" /></label>
-          <button class="btn primary small" id="add-item">Adicionar</button>
-        </div>
-      </div>`;
-
-    // Atualização inline de itens.
-    detail.querySelectorAll("[data-dur]").forEach((el) =>
-      el.addEventListener("change", () => updateItem(playlistId, el.dataset.dur, { duration: Number(el.value) })));
-    detail.querySelectorAll("[data-fit]").forEach((el) =>
-      el.addEventListener("change", () => updateItem(playlistId, el.dataset.fit, { fit: el.value })));
-    detail.querySelectorAll("[data-trans]").forEach((el) =>
-      el.addEventListener("change", () => updateItem(playlistId, el.dataset.trans, { transition: el.value })));
-    detail.querySelectorAll("[data-mute]").forEach((el) =>
-      el.addEventListener("change", () => updateItem(playlistId, el.dataset.mute, { muted: !el.checked })));
-    detail.querySelectorAll("[data-del-item]").forEach((el) =>
-      el.addEventListener("click", () => deleteItem(playlistId, el.dataset.delItem)));
-
-    document.getElementById("add-item").addEventListener("click", async () => {
-      const media_id = Number(document.getElementById("add-media").value);
-      const duration = Number(document.getElementById("add-duration").value);
-      const fit = document.getElementById("add-fit").value;
-      const transition = document.getElementById("add-trans").value;
-      const muted = !document.getElementById("add-mute").checked;
-      if (!media_id) { toast("Selecione uma mídia.", "error"); return; }
-      try {
-        await api(`/api/playlists/${playlistId}/items`, {
-          method: "POST",
-          body: JSON.stringify({ media_id, duration, fit, transition, muted }),
-        });
-        toast("Item adicionado.", "success");
-        loadPlaylists();
-      } catch (err) { toast(err.message, "error"); }
-    });
-
-    document.getElementById("rename-playlist").addEventListener("click", async () => {
-      const name = prompt("Novo nome:", playlist.name);
-      if (!name) return;
-      try {
-        await api(`/api/playlists/${playlistId}`, { method: "PATCH", body: JSON.stringify({ name }) });
-        loadPlaylists();
-      } catch (err) { toast(err.message, "error"); }
-    });
-
-    document.getElementById("delete-playlist").addEventListener("click", async () => {
-      if (!confirm("Excluir esta playlist?")) return;
-      try {
-        await api(`/api/playlists/${playlistId}`, { method: "DELETE" });
-        openPlaylistId = null;
-        document.getElementById("playlist-detail").innerHTML = `<p class="muted">Selecione uma playlist.</p>`;
-        loadPlaylists();
-      } catch (err) { toast(err.message, "error"); }
-    });
+  // ----------------------------- Documento ------------------------- //
+  function renderDoc() {
+    const doc = $("doc");
+    if (state.activeSection === "screens") doc.innerHTML = '<div class="stage-wrap"><div class="stage" id="stage"></div><div class="stage-hint" id="stage-hint"></div></div>';
+    else if (state.activeSection === "media") doc.innerHTML = renderMediaDoc();
+    else if (state.activeSection === "playlists") doc.innerHTML = renderPlaylistDoc();
+    else doc.innerHTML = renderSchedulesDoc();
+    if (state.activeSection === "screens") renderStage();
+    else if (state.activeSection === "media") bindMediaDoc();
+    else if (state.activeSection === "playlists") bindPlaylistDoc();
+    else bindSchedulesDoc();
   }
 
-  /**
-   * Atualiza um item de playlist.
-   * @param {number} playlistId ID da playlist.
-   * @param {string|number} itemId ID do item.
-   * @param {Object} patch Campos a atualizar.
-   */
-  async function updateItem(playlistId, itemId, patch) {
-    try {
-      await api(`/api/playlists/${playlistId}/items/${itemId}`, {
-        method: "PATCH", body: JSON.stringify(patch),
-      });
-      toast("Item atualizado.", "success");
-      loadPlaylists();
-    } catch (err) { toast(err.message, "error"); }
-  }
-
-  /**
-   * Remove um item de playlist.
-   * @param {number} playlistId ID da playlist.
-   * @param {string|number} itemId ID do item.
-   */
-  async function deleteItem(playlistId, itemId) {
-    try {
-      await api(`/api/playlists/${playlistId}/items/${itemId}`, { method: "DELETE" });
-      loadPlaylists();
-    } catch (err) { toast(err.message, "error"); }
-  }
-
-  document.getElementById("playlist-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const name = document.getElementById("playlist-name").value;
-    try {
-      await api("/api/playlists", { method: "POST", body: JSON.stringify({ name }) });
-      toast("Playlist criada.", "success");
-      e.target.reset();
-      loadPlaylists();
-    } catch (err) { toast(err.message, "error"); }
-  });
-
-  // ----------------------------------------------------------------- //
-  // Telas, zonas e agendamentos
-  // ----------------------------------------------------------------- //
-  /** @type {Array<Object>} Cache das telas. */
-  let screenCache = [];
-  const DAYS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
-
-  /** Carrega e renderiza a lista de telas. */
-  async function loadScreens() {
-    try {
-      screenCache = await api("/api/screens");
-      renderScreens();
-    } catch (err) { toast(err.message, "error"); }
-  }
-
-  /**
-   * Converte minutos desde a meia-noite em "HH:MM".
-   * @param {number} minutes Minutos (0..1440).
-   * @returns {string} Hora formatada.
-   */
-  function minutesToHHMM(minutes) {
-    const h = String(Math.floor(minutes / 60)).padStart(2, "0");
-    const m = String(minutes % 60).padStart(2, "0");
-    return `${h}:${m}`;
-  }
-
-  /**
-   * Converte "HH:MM" em minutos desde a meia-noite.
-   * @param {string} value Hora no formato HH:MM.
-   * @returns {number} Minutos.
-   */
-  function hhmmToMinutes(value) {
-    const [h, m] = value.split(":").map(Number);
-    return (h || 0) * 60 + (m || 0);
-  }
-
-  /** Renderiza os cards de tela (com zonas e agendamentos). */
-  function renderScreens() {
-    const list = document.getElementById("screens-list");
-    if (screenCache.length === 0) {
-      list.innerHTML = `<p class="muted">Nenhuma tela cadastrada.</p>`;
-      return;
-    }
-    const now = Date.now();
-    const playlistOptions = (selected) =>
-      `<option value="">— sem playlist —</option>` +
-      playlistCache.map((p) => `<option value="${p.id}" ${p.id === selected ? "selected" : ""}>${esc(p.name)}</option>`).join("");
-
-    list.innerHTML = screenCache.map((s) => {
-      const online = s.last_seen && (now - new Date(s.last_seen).getTime() < 60000);
-      const playerUrl = `${location.origin}/player/?screen=${s.slug}`;
-      const zonesPreview = s.zones.map((z) =>
-        `<div class="zone-box" style="left:${z.x}%;top:${z.y}%;width:${z.width}%;height:${z.height}%">${esc(z.name)}</div>`
-      ).join("");
-
-      const zonesHtml = s.zones.map((z) => {
-        const schedules = z.schedules.map((sc) => `
-          <div class="item-row">
-            <span class="grow">${esc(playlistCache.find((p) => p.id === sc.playlist_id)?.name || "?")}
-              <span class="muted">· ${minutesToHHMM(sc.start_minute)}–${minutesToHHMM(sc.end_minute)}
-              · ${sc.days_of_week.split(",").map((d) => DAYS[Number(d)] || d).join(" ")}
-              · prio ${sc.priority}</span>
-            </span>
-            <button class="btn danger small" data-del-sched="${z.id}:${sc.id}">x</button>
-          </div>`).join("");
-
-        return `<div class="subcard">
-          <div class="row between">
-            <strong>${esc(z.name)}</strong>
-            <button class="btn danger small" data-del-zone="${s.id}:${z.id}">Remover zona</button>
-          </div>
-          <div class="grid-4">
-            <label class="field">x% <input type="number" value="${z.x}" data-zone-x="${s.id}:${z.id}" /></label>
-            <label class="field">y% <input type="number" value="${z.y}" data-zone-y="${s.id}:${z.id}" /></label>
-            <label class="field">larg% <input type="number" value="${z.width}" data-zone-w="${s.id}:${z.id}" /></label>
-            <label class="field">alt% <input type="number" value="${z.height}" data-zone-h="${s.id}:${z.id}" /></label>
-          </div>
-          <div class="row" style="margin-top:8px">
-            <label class="field grow">Playlist padrão
-              <select data-zone-pl="${s.id}:${z.id}">${playlistOptions(z.default_playlist_id)}</select>
-            </label>
-          </div>
-          <div style="margin-top:10px">
-            <div class="muted" style="margin-bottom:6px">Agendamentos</div>
-            ${schedules || '<p class="muted">Nenhum agendamento (usa a playlist padrão).</p>'}
-            <div class="grid-4" style="margin-top:6px">
-              <label class="field">Playlist
-                <select data-sched-pl="${z.id}">${playlistCache.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select>
-              </label>
-              <label class="field">Início <input type="time" value="08:00" data-sched-start="${z.id}" /></label>
-              <label class="field">Fim <input type="time" value="18:00" data-sched-end="${z.id}" /></label>
-              <label class="field">Prioridade <input type="number" value="1" data-sched-prio="${z.id}" /></label>
-            </div>
-            <div class="row" style="margin-top:6px">
-              <span class="muted">Dias:</span>
-              ${DAYS.map((d, i) => `<label class="badge"><input type="checkbox" data-sched-day="${z.id}" value="${i}" ${i < 5 ? "checked" : ""}/> ${d}</label>`).join("")}
-              <button class="btn primary small" data-add-sched="${z.id}">Agendar</button>
-            </div>
-          </div>
-        </div>`;
-      }).join("");
-
-      return `<div class="card" style="grid-column:1/-1">
-        <div class="row between">
-          <h3>${esc(s.name)}</h3>
-          <span class="badge ${online ? "online" : "offline"}">${online ? "online" : "offline"}</span>
-        </div>
-        <div class="meta">Fuso: ${esc(s.timezone)}</div>
-        <div class="row"><span class="muted">URL da TV:</span> <span class="code">${esc(playerUrl)}</span>
-          <button class="btn ghost small" data-copy="${esc(playerUrl)}">Copiar</button></div>
-        <div class="zone-preview">${zonesPreview}</div>
-        ${zonesHtml}
-        <div class="subcard">
-          <div class="row between">
-            <strong>Nova zona</strong>
-            <button class="btn primary small" data-add-zone="${s.id}">Adicionar zona</button>
-          </div>
-        </div>
-        <div class="row between">
-          <span class="badge">${s.slug}</span>
-          <button class="btn danger small" data-del-screen="${s.id}">Excluir tela</button>
-        </div>
-      </div>`;
+  // ------------------------------ Canvas --------------------------- //
+  function renderStage() {
+    const sc = screen();
+    const stage = $("stage");
+    if (!stage) return;
+    if (!sc) { stage.innerHTML = ""; return; }
+    stage.innerHTML = sc.zones.slice().sort((a, b) => a.z_index - b.z_index).map((z) => {
+      const pl = playlistById(z.default_playlist_id);
+      const body = pl ? esc(pl.name) + " - " + pl.items.length + " item(s)" : "Sem playlist padrao";
+      return '<div class="zone ' + (z.id === state.selectedZoneId ? "selected" : "") + '" data-zone="' + z.id + '" style="left:' + z.x + '%;top:' + z.y + '%;width:' + z.width + '%;height:' + z.height + '%"><div class="zone-label">' + ICONS.layout + '<span>' + esc(z.name) + '</span></div><div class="zone-body">' + body + '</div><div class="resize" data-resize="' + z.id + '"></div></div>';
     }).join("");
-
-    bindScreenEvents();
+    $("stage-hint").textContent = sc.name + " - " + sc.zones.length + " zona(s) - arraste para mover, use o canto para redimensionar";
+    bindZoneInteractions();
   }
 
-  /** Associa os eventos dos cards de tela após render. */
-  function bindScreenEvents() {
-    const list = document.getElementById("screens-list");
+  function bindZoneInteractions() {
+    const stage = $("stage");
+    stage.querySelectorAll("[data-zone]").forEach((el) => {
+      el.addEventListener("pointerdown", (e) => {
+        if (e.target.closest("[data-resize]")) return;
+        const z = zoneOf(Number(el.dataset.zone));
+        state.selectedZoneId = z.id; renderInspector(); markSelected();
+        startDrag(e, z, "move");
+      });
+    });
+    stage.querySelectorAll("[data-resize]").forEach((el) => {
+      el.addEventListener("pointerdown", (e) => { e.stopPropagation(); const z = zoneOf(Number(el.dataset.resize)); state.selectedZoneId = z.id; renderInspector(); markSelected(); startDrag(e, z, "resize"); });
+    });
+  }
+  function zoneOf(id) { return screen().zones.find((z) => z.id === id); }
+  function markSelected() { const stage = $("stage"); if (!stage) return; stage.querySelectorAll("[data-zone]").forEach((el) => el.classList.toggle("selected", Number(el.dataset.zone) === state.selectedZoneId)); }
 
-    list.querySelectorAll("[data-copy]").forEach((b) =>
-      b.addEventListener("click", () => {
-        navigator.clipboard.writeText(b.dataset.copy).then(() => toast("URL copiada.", "success"));
-      }));
-
-    list.querySelectorAll("[data-del-screen]").forEach((b) =>
-      b.addEventListener("click", async () => {
-        if (!confirm("Excluir esta tela?")) return;
-        try { await api(`/api/screens/${b.dataset.delScreen}`, { method: "DELETE" }); loadScreens(); }
-        catch (err) { toast(err.message, "error"); }
-      }));
-
-    // Zonas: criar.
-    list.querySelectorAll("[data-add-zone]").forEach((b) =>
-      b.addEventListener("click", async () => {
-        try {
-          await api(`/api/screens/${b.dataset.addZone}/zones`, {
-            method: "POST",
-            body: JSON.stringify({ name: "Nova zona", x: 0, y: 0, width: 50, height: 50, z_index: 1 }),
-          });
-          toast("Zona criada.", "success");
-          loadScreens();
-        } catch (err) { toast(err.message, "error"); }
-      }));
-
-    // Zonas: remover.
-    list.querySelectorAll("[data-del-zone]").forEach((b) =>
-      b.addEventListener("click", async () => {
-        const [screenId, zoneId] = b.dataset.delZone.split(":");
-        if (!confirm("Remover esta zona?")) return;
-        try { await api(`/api/screens/${screenId}/zones/${zoneId}`, { method: "DELETE" }); loadScreens(); }
-        catch (err) { toast(err.message, "error"); }
-      }));
-
-    // Zonas: atualizar geometria/playlist.
-    const zoneFieldMap = {
-      "zoneX": "x", "zoneY": "y", "zoneW": "width", "zoneH": "height",
+  function startDrag(e, z, mode) {
+    e.preventDefault();
+    isDragging = true;
+    const rect = $("stage").getBoundingClientRect();
+    const sx = e.clientX, sy = e.clientY;
+    const o = { x: z.x, y: z.y, w: z.width, h: z.height };
+    const move = (ev) => {
+      const dx = ((ev.clientX - sx) / rect.width) * 100;
+      const dy = ((ev.clientY - sy) / rect.height) * 100;
+      if (mode === "move") { z.x = clamp(Math.round(o.x + dx), 0, 100 - z.width); z.y = clamp(Math.round(o.y + dy), 0, 100 - z.height); }
+      else { z.width = clamp(Math.round(o.w + dx), 5, 100 - z.x); z.height = clamp(Math.round(o.h + dy), 5, 100 - z.y); }
+      applyZoneGeometry(z); syncInspectorGeometry(z);
     };
-    Object.entries(zoneFieldMap).forEach(([dataKey, field]) => {
-      list.querySelectorAll(`[data-${dataKey.replace(/([A-Z])/g, "-$1").toLowerCase()}]`).forEach((el) =>
-        el.addEventListener("change", () => {
-          const [screenId, zoneId] = el.dataset[dataKey].split(":");
-          patchZone(screenId, zoneId, { [field]: Number(el.value) });
-        }));
-    });
-    list.querySelectorAll("[data-zone-pl]").forEach((el) =>
-      el.addEventListener("change", () => {
-        const [screenId, zoneId] = el.dataset.zonePl.split(":");
-        patchZone(screenId, zoneId, { default_playlist_id: el.value ? Number(el.value) : null });
-      }));
-
-    // Agendamentos: adicionar.
-    list.querySelectorAll("[data-add-sched]").forEach((b) =>
-      b.addEventListener("click", async () => {
-        const zoneId = b.dataset.addSched;
-        const playlist_id = Number(list.querySelector(`[data-sched-pl="${zoneId}"]`).value);
-        const start_minute = hhmmToMinutes(list.querySelector(`[data-sched-start="${zoneId}"]`).value);
-        const end_minute = hhmmToMinutes(list.querySelector(`[data-sched-end="${zoneId}"]`).value);
-        const priority = Number(list.querySelector(`[data-sched-prio="${zoneId}"]`).value);
-        const days = Array.from(list.querySelectorAll(`[data-sched-day="${zoneId}"]:checked`)).map((c) => c.value);
-        if (!playlist_id) { toast("Selecione uma playlist.", "error"); return; }
-        if (days.length === 0) { toast("Selecione ao menos um dia.", "error"); return; }
-        try {
-          await api(`/api/zones/${zoneId}/schedules`, {
-            method: "POST",
-            body: JSON.stringify({
-              playlist_id, start_minute, end_minute, priority,
-              days_of_week: days.join(","),
-            }),
-          });
-          toast("Agendamento criado.", "success");
-          loadScreens();
-        } catch (err) { toast(err.message, "error"); }
-      }));
-
-    // Agendamentos: remover.
-    list.querySelectorAll("[data-del-sched]").forEach((b) =>
-      b.addEventListener("click", async () => {
-        const [zoneId, schedId] = b.dataset.delSched.split(":");
-        try { await api(`/api/zones/${zoneId}/schedules/${schedId}`, { method: "DELETE" }); loadScreens(); }
-        catch (err) { toast(err.message, "error"); }
-      }));
+    const up = async () => {
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); isDragging = false;
+      try { await api("/api/screens/" + state.activeScreenId + "/zones/" + z.id, { method: "PATCH", body: JSON.stringify({ x: z.x, y: z.y, width: z.width, height: z.height }) }); renderBottom(); renderStatus(); }
+      catch (err) { toast({ kind: "err", msg: err.message }); }
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
   }
 
-  /**
-   * Atualiza uma zona via API.
-   * @param {string|number} screenId ID da tela.
-   * @param {string|number} zoneId ID da zona.
-   * @param {Object} patch Campos a atualizar.
-   */
-  async function patchZone(screenId, zoneId, patch) {
-    try {
-      await api(`/api/screens/${screenId}/zones/${zoneId}`, {
-        method: "PATCH", body: JSON.stringify(patch),
+  function applyZoneGeometry(z) { const el = $("stage").querySelector('[data-zone="' + z.id + '"]'); if (el) { el.style.left = z.x + "%"; el.style.top = z.y + "%"; el.style.width = z.width + "%"; el.style.height = z.height + "%"; } }
+  function syncInspectorGeometry(z) { [["x", "x"], ["y", "y"], ["w", "width"], ["h", "height"]].forEach((pair) => { const i = $("f-" + pair[0]); if (i) i.value = z[pair[1]]; const v = $("v-" + pair[0]); if (v) v.textContent = z[pair[1]] + "%"; }); }
+
+  // ---------------------------- Inspector -------------------------- //
+  function renderInspector() {
+    const insp = $("inspector");
+    if (state.activeSection === "media") { insp.innerHTML = renderMediaInspector(); bindMediaInspector(); return; }
+    if (state.activeSection === "playlists") { insp.innerHTML = '<div class="insp-head">' + ICONS.playlist + '<span>Playlist</span></div><div class="insp-section"><p class="empty" style="padding:0">Selecione um item na linha do tempo do editor para ajustar duracao, ajuste, transicao e som.</p></div>'; return; }
+    if (state.activeSection === "schedules") { insp.innerHTML = '<div class="insp-head">' + ICONS.clock + '<span>Agendamentos</span></div><div class="insp-section"><p class="empty" style="padding:0">Os agendamentos sao criados no inspetor de cada zona (secao Telas).</p></div>'; return; }
+    const z = zone();
+    const sc = screen();
+    if (!z) { insp.innerHTML = '<div class="insp-head">' + ICONS.screen + '<span>Tela</span></div>' + (sc ? screenProps(sc) : '<div class="empty">Selecione uma tela.</div>'); bindInspector(); return; }
+    insp.innerHTML = '<div class="insp-head">' + ICONS.layout + '<span>Zona: ' + esc(z.name) + '</span></div>' +
+      '<div class="insp-section"><h5>Identificacao</h5>' + field("Nome", '<input id="f-name" value="' + esc(z.name) + '"/>') + field("Camada (z-index)", '<input id="f-z" type="number" value="' + z.z_index + '"/>') + '</div>' +
+      '<div class="insp-section"><h5>Geometria (% da tela)</h5><div class="grid2">' + rangeField("x", "X", z.x) + rangeField("y", "Y", z.y) + rangeField("w", "Largura", z.width) + rangeField("h", "Altura", z.height) + '</div></div>' +
+      '<div class="insp-section"><h5>Conteudo</h5>' + field("Playlist padrao", '<select id="f-playlist"><option value="">- sem playlist -</option>' + state.playlists.map((p) => '<option value="' + p.id + '"' + (p.id === z.default_playlist_id ? " selected" : "") + '>' + esc(p.name) + '</option>').join("") + '</select>') +
+      '<button class="btn ghost block small" data-open-playlist>' + ICONS.playlist + ' Abrir no editor de playlists</button></div>' +
+      '<div class="insp-section"><h5>Agendamentos</h5>' + (z.schedules.length ? z.schedules.map(schedCard).join("") : '<div class="empty" style="padding:0 0 8px">Sem agendamentos. A playlist padrao toca sempre.</div>') + schedForm(z) + '</div>' +
+      '<div class="insp-section"><button class="btn block" data-dup-zone>' + ICONS.copy + ' Duplicar zona</button><button class="btn danger block small" style="margin-top:8px" data-del-zone>' + ICONS.trash + ' Excluir zona</button></div>';
+    bindInspector();
+  }
+
+  function screenProps(sc) {
+    return '<div class="insp-section"><h5>Tela</h5>' + field("Nome", '<input id="f-sname" value="' + esc(sc.name) + '"/>') + field("Fuso horario", '<input id="f-tz" value="' + esc(sc.timezone) + '"/>') +
+      '<div class="switch"><span>Status</span><span class="tag" style="color:' + (isOnline(sc) ? "var(--green)" : "var(--faint)") + '">' + (isOnline(sc) ? "online" : "offline") + '</span></div>' +
+      field("Slug (somente leitura)", '<input value="' + esc(sc.slug) + '" readonly/>') +
+      '<div class="field"><label>Link do player (TV)</label><div class="code">' + esc(playerUrl(sc.slug)) + '</div></div>' +
+      '<button class="btn ghost block small" data-copy-link>' + ICONS.copy + ' Copiar link</button>' +
+      '<button class="btn ghost block small" style="margin-top:8px" data-preview-screen>' + ICONS.eye + ' Pre-visualizar player</button></div>' +
+      '<div class="insp-section"><button class="btn block" data-add-zone>' + ICONS.plus + ' Adicionar zona</button><button class="btn danger block small" style="margin-top:8px" data-del-screen>' + ICONS.trash + ' Excluir tela</button></div>';
+  }
+
+  function field(label, inner) { return '<div class="field"><label>' + label + '</label>' + inner + '</div>'; }
+  function rangeField(key, label, val) { return '<div class="field"><label>' + label + '</label><div class="range-row"><input id="f-' + key + '" type="range" min="0" max="100" value="' + val + '" data-geo="' + key + '"/><span class="val" id="v-' + key + '">' + val + '%</span></div></div>'; }
+  function schedCard(sc) {
+    const pl = playlistById(sc.playlist_id);
+    const days = (sc.days_of_week || "").split(",").filter((x) => x !== "").map(Number);
+    return '<div class="sched"><div class="row"><strong>' + esc(pl ? pl.name : "?") + '</strong><span class="tag">' + minToHHMM(sc.start_minute) + " - " + minToHHMM(sc.end_minute) + ' P' + sc.priority + '</span></div><div class="days">' + DAYS.map((d, i) => '<span class="day ' + (days.includes(i) ? "on" : "") + '" title="' + DAYS_FULL[i] + '">' + d + '</span>').join("") + '</div><button class="btn danger block small" style="margin-top:7px" data-del-sched="' + sc.id + '">' + ICONS.trash + ' Remover</button></div>';
+  }
+  function schedForm(z) {
+    return '<div class="sched" style="margin-top:6px"><div class="field"><label>Nova regra - playlist</label><select id="sf-pl">' + state.playlists.map((p) => '<option value="' + p.id + '">' + esc(p.name) + '</option>').join("") + '</select></div><div class="grid2"><div class="field"><label>Inicio</label><input id="sf-start" type="time" value="08:00"/></div><div class="field"><label>Fim</label><input id="sf-end" type="time" value="18:00"/></div></div><div class="field"><label>Prioridade</label><input id="sf-prio" type="number" value="1"/></div><div class="days" id="sf-days">' + DAYS.map((d, i) => '<span class="day ' + (i < 5 ? "on" : "") + '" data-day="' + i + '" title="' + DAYS_FULL[i] + '">' + d + '</span>').join("") + '</div><button class="btn primary block small" style="margin-top:8px" data-add-sched>' + ICONS.plus + ' Agendar</button></div>';
+  }
+
+  function bindInspector() {
+    const insp = $("inspector");
+    const z = zone();
+    if (z) {
+      const screenId = state.activeScreenId;
+      const nm = $("f-name"); if (nm) { nm.addEventListener("input", () => { z.name = nm.value; renderStage(); renderTabs(); }); nm.addEventListener("change", () => patchZone(z.id, { name: nm.value })); }
+      const zi = $("f-z"); if (zi) zi.addEventListener("change", () => { z.z_index = Number(zi.value) || 0; patchZone(z.id, { z_index: z.z_index }); renderStage(); });
+      insp.querySelectorAll("[data-geo]").forEach((r) => {
+        r.addEventListener("input", () => { const k = r.dataset.geo; const f = { x: "x", y: "y", w: "width", h: "height" }[k]; z[f] = clamp(Number(r.value), 0, 100); const v = $("v-" + k); if (v) v.textContent = z[f] + "%"; applyZoneGeometry(z); });
+        r.addEventListener("change", () => patchZone(z.id, { x: z.x, y: z.y, width: z.width, height: z.height }));
       });
-      toast("Zona atualizada.", "success");
-      loadScreens();
-    } catch (err) { toast(err.message, "error"); }
+      const pl = $("f-playlist"); if (pl) pl.addEventListener("change", () => { z.default_playlist_id = pl.value ? Number(pl.value) : null; patchZone(z.id, { default_playlist_id: z.default_playlist_id }); renderStage(); renderBottom(); });
+      const op = insp.querySelector("[data-open-playlist]"); if (op) op.addEventListener("click", () => { if (z.default_playlist_id) state.openPlaylistId = z.default_playlist_id; state.activeSection = "playlists"; renderActivity(); renderSidebar(); renderTabs(); renderDoc(); renderInspector(); renderBottom(); });
+      const dz = insp.querySelector("[data-dup-zone]"); if (dz) dz.addEventListener("click", async () => { try { await api("/api/screens/" + screenId + "/zones", { method: "POST", body: JSON.stringify({ name: z.name + " (copia)", x: clamp(z.x + 5, 0, 90), y: clamp(z.y + 5, 0, 90), width: z.width, height: z.height, z_index: z.z_index + 1, default_playlist_id: z.default_playlist_id }) }); await loadScreens(); const s = screen(); state.selectedZoneId = s.zones[s.zones.length - 1].id; renderAll(); toast({ kind: "ok", msg: "Zona duplicada." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+      const del = insp.querySelector("[data-del-zone]"); if (del) del.addEventListener("click", async () => { if (!confirm("Excluir esta zona?")) return; try { await api("/api/screens/" + screenId + "/zones/" + z.id, { method: "DELETE" }); await loadScreens(); const s = screen(); state.selectedZoneId = s && s.zones[0] ? s.zones[0].id : null; renderAll(); toast({ kind: "warn", msg: "Zona excluida." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+      insp.querySelectorAll("#sf-days .day").forEach((d) => d.addEventListener("click", () => d.classList.toggle("on")));
+      const as = insp.querySelector("[data-add-sched]"); if (as) as.addEventListener("click", () => addSchedule(z.id));
+      insp.querySelectorAll("[data-del-sched]").forEach((b) => b.addEventListener("click", () => deleteSchedule(z.id, Number(b.dataset.delSched))));
+    } else {
+      const sc = screen();
+      const sn = $("f-sname"); if (sn) { sn.addEventListener("input", () => { sc.name = sn.value; renderTabs(); renderSidebar(); }); sn.addEventListener("change", () => patchScreen(sc.id, { name: sn.value })); }
+      const tz = $("f-tz"); if (tz) tz.addEventListener("change", () => patchScreen(sc.id, { timezone: tz.value }));
+      const cl = insp.querySelector("[data-copy-link]"); if (cl) cl.addEventListener("click", () => copyText(playerUrl(sc.slug)));
+      const pv = insp.querySelector("[data-preview-screen]"); if (pv) pv.addEventListener("click", () => window.open(playerUrl(sc.slug), "_blank"));
+      const az = insp.querySelector("[data-add-zone]"); if (az) az.addEventListener("click", async () => { try { await api("/api/screens/" + sc.id + "/zones", { method: "POST", body: JSON.stringify({ name: "Nova zona", x: 10, y: 10, width: 40, height: 40, z_index: sc.zones.length + 1 }) }); await loadScreens(); const s = screen(); state.selectedZoneId = s.zones[s.zones.length - 1].id; renderAll(); toast({ kind: "ok", msg: "Zona adicionada." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+      const ds = insp.querySelector("[data-del-screen]"); if (ds) ds.addEventListener("click", async () => { if (!confirm("Excluir esta tela?")) return; try { await api("/api/screens/" + sc.id, { method: "DELETE" }); await loadScreens(); fixSelection(); renderAll(); toast({ kind: "warn", msg: "Tela excluida." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+    }
   }
 
-  document.getElementById("screen-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const name = document.getElementById("screen-name").value;
-    const timezone = document.getElementById("screen-tz").value || "America/Sao_Paulo";
+  async function patchZone(zoneId, patch) { try { await api("/api/screens/" + state.activeScreenId + "/zones/" + zoneId, { method: "PATCH", body: JSON.stringify(patch) }); renderBottom(); renderStatus(); } catch (err) { toast({ kind: "err", msg: err.message }); } }
+  async function patchScreen(screenId, patch) { try { await api("/api/screens/" + screenId, { method: "PATCH", body: JSON.stringify(patch) }); } catch (err) { toast({ kind: "err", msg: err.message }); } }
+
+  async function addSchedule(zoneId) {
+    const insp = $("inspector");
+    const playlist_id = Number(insp.querySelector("#sf-pl").value);
+    const start_minute = hhmmToMin(insp.querySelector("#sf-start").value);
+    const end_minute = hhmmToMin(insp.querySelector("#sf-end").value);
+    const priority = Number(insp.querySelector("#sf-prio").value) || 0;
+    const days = Array.from(insp.querySelectorAll("#sf-days .day.on")).map((d) => d.dataset.day);
+    if (!playlist_id) { toast({ kind: "warn", msg: "Selecione uma playlist." }); return; }
+    if (!days.length) { toast({ kind: "warn", msg: "Selecione ao menos um dia." }); return; }
+    try { await api("/api/zones/" + zoneId + "/schedules", { method: "POST", body: JSON.stringify({ playlist_id, days_of_week: days.join(","), start_minute, end_minute, priority }) }); await loadScreens(); renderInspector(); renderBottom(); toast({ kind: "ok", msg: "Agendamento criado." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+  async function deleteSchedule(zoneId, schedId) { try { await api("/api/zones/" + zoneId + "/schedules/" + schedId, { method: "DELETE" }); await loadScreens(); renderInspector(); renderBottom(); toast({ kind: "warn", msg: "Agendamento removido." }); } catch (err) { toast({ kind: "err", msg: err.message }); } }
+
+  // ----------------------------- Midias ---------------------------- //
+  function renderMediaDoc() {
+    const typeOpts = Object.keys(TYPE_LABEL).map((t) => '<option value="' + t + '">' + TYPE_LABEL[t] + '</option>').join("");
+    const form = '<div class="item-row row wrap" style="gap:10px;margin-bottom:14px"><input id="m-name" placeholder="Nome da midia" style="flex:1;min-width:160px"/><select id="m-type">' + typeOpts + '</select><input id="m-file" type="file" accept="image/*,video/*"/><input id="m-value" placeholder="Texto, HTML ou URL" class="hidden" style="flex:1;min-width:160px"/><button class="btn primary small" id="m-add">' + ICONS.plus + ' Adicionar</button></div>';
+    const grid = state.media.length ? '<div class="media-grid">' + state.media.map(mediaCard).join("") + '</div>' : '<div class="empty">Nenhuma midia cadastrada.</div>';
+    return form + grid;
+  }
+  function mediaCard(m) {
+    let thumb;
+    if (m.type === "image" && m.path) thumb = '<div class="thumb"><img src="/media/' + esc(m.path) + '" alt=""/></div>';
+    else if (m.type === "video" && m.path) thumb = '<div class="thumb"><video src="/media/' + esc(m.path) + '" muted></video></div>';
+    else thumb = '<div class="thumb placeholder">' + ICONS[TYPE_ICON[m.type]] + '</div>';
+    return '<div class="media-card" data-mcard="' + m.id + '">' + thumb + '<div class="mc-body"><div class="mc-name">' + esc(m.name) + '</div><div class="mc-foot"><span class="tag">' + TYPE_LABEL[m.type] + '</span><button class="btn danger small" data-del-media="' + m.id + '">' + ICONS.trash + '</button></div></div></div>';
+  }
+  function bindMediaDoc() {
+    const doc = $("doc");
+    const typeSel = $("m-type"); const fileI = $("m-file"); const valI = $("m-value");
+    const sync = () => { const t = typeSel.value; const isFile = (t === "image" || t === "video"); fileI.classList.toggle("hidden", !isFile); valI.classList.toggle("hidden", isFile); };
+    sync(); typeSel.addEventListener("change", sync);
+    $("m-add").addEventListener("click", addMedia);
+    doc.querySelectorAll("[data-mcard]").forEach((c) => c.addEventListener("click", (e) => { if (e.target.closest("[data-del-media]")) return; state.selectedMediaId = Number(c.dataset.mcard); renderSidebar(); renderInspector(); }));
+    doc.querySelectorAll("[data-del-media]").forEach((b) => b.addEventListener("click", async () => { if (!confirm("Excluir esta midia?")) return; try { await api("/api/media/" + b.dataset.delMedia, { method: "DELETE" }); await loadMedia(); renderSidebar(); renderDoc(); toast({ kind: "warn", msg: "Midia excluida." }); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+  }
+  async function addMedia() {
+    const name = $("m-name").value.trim();
+    const type = $("m-type").value;
+    if (!name) { toast({ kind: "warn", msg: "Informe um nome." }); return; }
     try {
-      await api("/api/screens", { method: "POST", body: JSON.stringify({ name, timezone }) });
-      toast("Tela criada.", "success");
-      e.target.reset();
-      document.getElementById("screen-tz").value = "America/Sao_Paulo";
-      loadScreens();
-    } catch (err) { toast(err.message, "error"); }
-  });
+      if (type === "image" || type === "video") {
+        const file = $("m-file").files[0]; if (!file) { toast({ kind: "warn", msg: "Selecione um arquivo." }); return; }
+        const fd = new FormData(); fd.append("name", name); fd.append("file", file);
+        await api("/api/media/upload", { method: "POST", body: fd });
+      } else {
+        const value = $("m-value").value;
+        const body = { name, type };
+        if (type === "url" || type === "youtube" || type === "embed") body.source_url = value; else body.content = value;
+        await api("/api/media", { method: "POST", body: JSON.stringify(body) });
+      }
+      await loadMedia(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: "Midia adicionada." });
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+  function renderMediaInspector() {
+    const m = mediaById(state.selectedMediaId);
+    if (!m) return '<div class="insp-head">' + ICONS.media + '<span>Midias</span></div><div class="insp-section"><p class="empty" style="padding:0">Selecione uma midia para editar nome e conteudo.</p></div>';
+    let valField = "";
+    if (m.type === "text" || m.type === "html") valField = field("Conteudo", '<textarea id="mi-content">' + esc(m.content || "") + '</textarea>');
+    else if (m.type === "url" || m.type === "youtube" || m.type === "embed") valField = field("URL de origem", '<input id="mi-url" value="' + esc(m.source_url || "") + '"/>');
+    else valField = '<div class="field"><label>Arquivo</label><div class="code">' + esc(m.path || "-") + '</div></div>';
+    return '<div class="insp-head">' + ICONS[TYPE_ICON[m.type]] + '<span>' + esc(m.name) + '</span></div><div class="insp-section"><h5>' + TYPE_LABEL[m.type] + '</h5>' + field("Nome", '<input id="mi-name" value="' + esc(m.name) + '"/>') + valField + '<button class="btn primary block small" data-save-media>' + ICONS.check + ' Salvar</button></div>';
+  }
+  function bindMediaInspector() {
+    const insp = $("inspector"); const m = mediaById(state.selectedMediaId); if (!m) return;
+    const save = insp.querySelector("[data-save-media]"); if (!save) return;
+    save.addEventListener("click", async () => {
+      const patch = { name: $("mi-name").value };
+      if ($("mi-content")) patch.content = $("mi-content").value;
+      if ($("mi-url")) patch.source_url = $("mi-url").value;
+      try { await api("/api/media/" + m.id, { method: "PATCH", body: JSON.stringify(patch) }); await loadMedia(); renderSidebar(); renderDoc(); renderInspector(); toast({ kind: "ok", msg: "Midia atualizada." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
+  }
 
-  // Atualiza o status online/offline das telas periodicamente.
-  setInterval(() => { if (token) loadScreens(); }, 30000);
+  // ---------------------------- Playlists -------------------------- //
+  function renderPlaylistDoc() {
+    const pl = playlistById(state.openPlaylistId);
+    if (!pl) return '<div class="empty">Nenhuma playlist selecionada. Use o botao + na barra lateral.</div>';
+    const head = '<div class="item-row row between" style="margin-bottom:12px"><strong style="font-size:14px">' + esc(pl.name) + '</strong><span class="row"><button class="btn ghost small" data-rename-pl>Renomear</button><button class="btn danger small" data-del-pl>' + ICONS.trash + ' Excluir</button></span></div>';
+    const items = pl.items.length ? pl.items.map((it, i) => itemRow(pl, it, i)).join("") : '<div class="empty">Sem itens. Adicione abaixo.</div>';
+    const mediaOpts = state.media.map((m) => '<option value="' + m.id + '">' + esc(m.name) + ' (' + TYPE_LABEL[m.type] + ')</option>').join("");
+    const add = '<div class="item-row row wrap" style="margin-top:12px;gap:10px"><select id="pi-media" style="flex:1;min-width:160px">' + mediaOpts + '</select><input id="pi-dur" type="number" min="1" value="10" class="mini" title="Duracao (s)"/><select id="pi-fit">' + FITS.map((f) => '<option>' + f + '</option>').join("") + '</select><select id="pi-trans">' + TRANSITIONS.map((t) => '<option>' + t + '</option>').join("") + '</select><label class="row" style="gap:5px"><input id="pi-sound" type="checkbox"/> som</label><button class="btn primary small" id="pi-add">' + ICONS.plus + ' Item</button></div>';
+    return '<div class="pl-editor">' + head + '<div class="pl-items">' + items + '</div>' + add + '</div>';
+  }
+  function itemRow(pl, it, i) {
+    const md = it.media;
+    return '<div class="item-row" data-item="' + it.id + '"><span class="tag">' + (i + 1) + '</span>' + ICONS[TYPE_ICON[md.type]] + '<span class="grow">' + esc(md.name) + '</span>' +
+      '<input type="number" min="1" value="' + it.duration + '" class="mini" data-it-dur="' + it.id + '" title="Duracao (s)"/>' +
+      '<select data-it-fit="' + it.id + '">' + FITS.map((f) => '<option ' + (f === it.fit ? "selected" : "") + '>' + f + '</option>').join("") + '</select>' +
+      '<select data-it-trans="' + it.id + '">' + TRANSITIONS.map((t) => '<option ' + (t === it.transition ? "selected" : "") + '>' + t + '</option>').join("") + '</select>' +
+      '<label class="row" style="gap:4px" title="Som"><input type="checkbox" data-it-sound="' + it.id + '" ' + (it.muted ? "" : "checked") + '/></label>' +
+      '<button class="btn ghost small" data-it-up="' + it.id + '">' + ICONS.up + '</button><button class="btn ghost small" data-it-down="' + it.id + '">' + ICONS.down + '</button>' +
+      '<button class="btn danger small" data-it-del="' + it.id + '">' + ICONS.trash + '</button></div>';
+  }
+  function bindPlaylistDoc() {
+    const doc = $("doc"); const pl = playlistById(state.openPlaylistId); if (!pl) return;
+    const rn = doc.querySelector("[data-rename-pl]"); if (rn) rn.addEventListener("click", async () => { const name = prompt("Novo nome da playlist:", pl.name); if (!name) return; try { await api("/api/playlists/" + pl.id, { method: "PATCH", body: JSON.stringify({ name }) }); await loadPlaylists(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: "Playlist renomeada." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+    const dp = doc.querySelector("[data-del-pl]"); if (dp) dp.addEventListener("click", async () => { if (!confirm("Excluir esta playlist?")) return; try { await api("/api/playlists/" + pl.id, { method: "DELETE" }); state.openPlaylistId = null; await loadPlaylists(); fixSelection(); renderSidebar(); renderDoc(); renderBottom(); toast({ kind: "warn", msg: "Playlist excluida." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+    const add = $("pi-add"); if (add) add.addEventListener("click", async () => { const media_id = Number($("pi-media").value); if (!media_id) { toast({ kind: "warn", msg: "Selecione uma midia." }); return; } const body = { media_id, duration: Number($("pi-dur").value) || 10, fit: $("pi-fit").value, transition: $("pi-trans").value, muted: !$("pi-sound").checked }; try { await api("/api/playlists/" + pl.id + "/items", { method: "POST", body: JSON.stringify(body) }); await loadPlaylists(); renderSidebar(); renderDoc(); renderBottom(); toast({ kind: "ok", msg: "Item adicionado." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+    doc.querySelectorAll("[data-it-dur]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itDur, { duration: Number(el.value) })));
+    doc.querySelectorAll("[data-it-fit]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itFit, { fit: el.value })));
+    doc.querySelectorAll("[data-it-trans]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itTrans, { transition: el.value })));
+    doc.querySelectorAll("[data-it-sound]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itSound, { muted: !el.checked })));
+    doc.querySelectorAll("[data-it-del]").forEach((el) => el.addEventListener("click", async () => { try { await api("/api/playlists/" + pl.id + "/items/" + el.dataset.itDel, { method: "DELETE" }); await loadPlaylists(); renderSidebar(); renderDoc(); renderBottom(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+    doc.querySelectorAll("[data-it-up]").forEach((el) => el.addEventListener("click", () => moveItem(pl, Number(el.dataset.itUp), -1)));
+    doc.querySelectorAll("[data-it-down]").forEach((el) => el.addEventListener("click", () => moveItem(pl, Number(el.dataset.itDown), 1)));
+  }
+  async function updateItem(plId, itemId, patch) { try { await api("/api/playlists/" + plId + "/items/" + itemId, { method: "PATCH", body: JSON.stringify(patch) }); await loadPlaylists(); renderBottom(); } catch (err) { toast({ kind: "err", msg: err.message }); } }
+  async function moveItem(pl, itemId, dir) {
+    const ids = pl.items.map((it) => it.id);
+    const idx = ids.indexOf(itemId); const ni = idx + dir;
+    if (ni < 0 || ni >= ids.length) return;
+    ids.splice(ni, 0, ids.splice(idx, 1)[0]);
+    try { await api("/api/playlists/" + pl.id + "/reorder", { method: "POST", body: JSON.stringify({ item_ids: ids }) }); await loadPlaylists(); renderSidebar(); renderDoc(); renderBottom(); } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
 
-  // ----------------------------------------------------------------- //
-  // Bootstrap
-  // ----------------------------------------------------------------- //
-  if (token) showApp(); else logout();
+  // --------------------------- Agendamentos ------------------------ //
+  function renderSchedulesDoc() {
+    const rows = [];
+    state.screens.forEach((s) => s.zones.forEach((z) => z.schedules.forEach((sc) => {
+      const pl = playlistById(sc.playlist_id);
+      const days = (sc.days_of_week || "").split(",").filter((x) => x !== "").map((d) => DAYS_FULL[Number(d)].slice(0, 3)).join(", ");
+      rows.push('<tr><td>' + esc(s.name) + '</td><td>' + esc(z.name) + '</td><td>' + esc(pl ? pl.name : "?") + '</td><td class="mono">' + minToHHMM(sc.start_minute) + " - " + minToHHMM(sc.end_minute) + '</td><td>' + days + '</td><td class="mono">' + sc.priority + '</td></tr>');
+    })));
+    if (!rows.length) return '<div class="empty">Nenhum agendamento. Selecione uma zona na secao Telas e use o inspetor para criar regras por horario e dia.</div>';
+    return '<table class="sched-table"><thead><tr><th>Tela</th><th>Zona</th><th>Playlist</th><th>Horario</th><th>Dias</th><th>Prio</th></tr></thead><tbody>' + rows.join("") + '</tbody></table>';
+  }
+  function bindSchedulesDoc() { /* somente leitura */ }
+
+  // -------------------------- Painel inferior ---------------------- //
+  const BOTTOM = [
+    { id: "timeline", label: "Linha do tempo", icon: "timeline" },
+    { id: "logs", label: "Saida", icon: "terminal" },
+    { id: "problems", label: "Problemas", icon: "alert" },
+  ];
+  function computeProblems() {
+    const probs = [];
+    state.screens.forEach((s) => s.zones.forEach((z) => {
+      const pl = playlistById(z.default_playlist_id);
+      if (!z.schedules.length && (!pl || pl.items.length === 0)) probs.push({ kind: "warn", desc: 'Zona "' + z.name + '" sem playlist com itens.', where: s.slug });
+      if (z.x + z.width > 100 || z.y + z.height > 100) probs.push({ kind: "err", desc: 'Zona "' + z.name + '" ultrapassa os limites da tela.', where: s.slug });
+    }));
+    return probs;
+  }
+  function renderBottom() {
+    const probs = computeProblems();
+    $("bottom-tabs").innerHTML = BOTTOM.map((b) => '<button class="bt ' + (b.id === state.bottomTab ? "active" : "") + '" data-bt="' + b.id + '">' + ICONS[b.icon] + '<span>' + b.label + '</span>' + (b.id === "problems" && probs.length ? '<span class="badge">' + probs.length + '</span>' : "") + '</button>').join("");
+    $("bottom-tabs").querySelectorAll("[data-bt]").forEach((b) => b.addEventListener("click", () => { state.bottomTab = b.dataset.bt; renderBottom(); }));
+    const c = $("bottom-content");
+    if (state.bottomTab === "timeline") c.innerHTML = renderTimeline();
+    else if (state.bottomTab === "logs") c.innerHTML = renderLogs();
+    else c.innerHTML = renderProblems(probs);
+  }
+  function timelinePlaylist() {
+    if (state.activeSection === "playlists" && state.openPlaylistId) return playlistById(state.openPlaylistId);
+    const z = zone(); if (z && z.default_playlist_id) return playlistById(z.default_playlist_id);
+    return null;
+  }
+  function renderTimeline() {
+    const pl = timelinePlaylist();
+    if (!pl || !pl.items.length) return '<div class="empty">Selecione uma zona com playlist (ou uma playlist) para ver a linha do tempo.</div>';
+    const total = pl.items.reduce((a, b) => a + b.duration, 0);
+    const alts = ["", "alt", "alt2"];
+    return '<div class="timeline"><div class="track-head"><span>' + esc(pl.name) + '</span><span class="mono">ciclo total: ' + total + 's</span></div><div class="track">' + pl.items.map((it, i) => '<div class="seg ' + alts[i % 3] + '" style="flex:' + it.duration + '"><strong>' + esc(it.media.name) + '</strong><small>' + it.duration + 's - ' + it.transition + (it.muted ? " - mudo" : " - som") + '</small></div>').join("") + '</div></div>';
+  }
+  function renderLogs() {
+    const now = new Date();
+    const t = (s) => new Date(now.getTime() - s * 1000).toLocaleTimeString("pt-BR");
+    const sc = screen();
+    const lines = [
+      { lvl: "ok", t: t(3), m: "Sessao autenticada no painel" },
+      { lvl: "info", t: t(20), m: "Dados sincronizados: " + state.screens.length + " telas, " + state.playlists.length + " playlists, " + state.media.length + " midias" },
+      { lvl: "info", t: t(64), m: "Alteracoes aplicadas ao vivo via /api/display/" + (sc ? sc.slug : "-") },
+      { lvl: "warn", t: t(150), m: "Autoplay com som depende do navegador do player (use modo quiosque)" },
+    ];
+    return lines.map((l) => '<div class="logline"><span class="t">' + l.t + '</span><span class="lvl ' + l.lvl + '">' + l.lvl.toUpperCase() + '</span><span>' + esc(l.m) + '</span></div>').join("");
+  }
+  function renderProblems(probs) {
+    if (!probs.length) return '<div class="empty">Nenhum problema detectado. Layout consistente.</div>';
+    return probs.map((p) => '<div class="problem ' + p.kind + '">' + ICONS.alert + '<div><div class="desc">' + esc(p.desc) + '</div><div class="where">' + esc(p.where) + '</div></div></div>').join("");
+  }
+
+  // ---------------------------- Status bar ------------------------- //
+  function renderStatus() {
+    const sc = screen();
+    const online = state.screens.filter(isOnline).length;
+    const probs = computeProblems().length;
+    const sbEl = $("statusbar");
+    sbEl.innerHTML = '<span class="si"><span class="pulse"></span> Ao vivo</span>' +
+      '<span class="si">' + ICONS.screen + ' ' + (sc ? esc(sc.slug) : "-") + '</span>' +
+      '<span class="spacer"></span>' +
+      '<span class="si">' + ICONS.wifi + ' ' + online + '/' + state.screens.length + ' online</span>' +
+      '<span class="si">' + ICONS.alert + ' ' + probs + ' problema(s)</span>' +
+      '<span class="si btn-like" data-preview>' + ICONS.eye + ' Pre-visualizar</span>' +
+      '<span class="si btn-like" data-reload>' + ICONS.refresh + ' Recarregar</span>';
+    const pv = sbEl.querySelector("[data-preview]"); if (pv) pv.addEventListener("click", () => { if (sc) window.open(playerUrl(sc.slug), "_blank"); else toast({ kind: "warn", msg: "Crie uma tela primeiro." }); });
+    sbEl.querySelector("[data-reload]").addEventListener("click", () => loadAll());
+  }
+
+  function copyText(text) { if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast({ kind: "ok", msg: "Copiado." })).catch(() => toast({ kind: "warn", msg: text })); else toast({ kind: "info", msg: text }); }
+
+  // ------------------------- Paleta de comandos -------------------- //
+  const COMMANDS = [
+    { icon: "screen", label: "Ir para: Telas", run: () => goSection("screens") },
+    { icon: "media", label: "Ir para: Midias", run: () => goSection("media") },
+    { icon: "playlist", label: "Ir para: Playlists", run: () => goSection("playlists") },
+    { icon: "clock", label: "Ir para: Agendamentos", run: () => goSection("schedules") },
+    { icon: "plus", label: "Nova tela", run: () => handleSideAct("add-screen") },
+    { icon: "plus", label: "Nova playlist", run: () => handleSideAct("add-playlist") },
+    { icon: "eye", label: "Pre-visualizar player da tela atual", run: () => { const s = screen(); if (s) window.open(playerUrl(s.slug), "_blank"); } },
+    { icon: "refresh", label: "Recarregar dados", run: () => loadAll() },
+    { icon: "sun", label: "Alternar tema claro/escuro", run: () => toggleTheme() },
+    { icon: "power", label: "Sair (logout)", run: () => logout() },
+  ];
+  let palIndex = 0, palFiltered = COMMANDS;
+  function goSection(sec) { state.activeSection = sec; renderActivity(); renderSidebar(); renderTabs(); renderDoc(); renderInspector(); renderBottom(); }
+  function openPalette() { $("palette").hidden = false; const inp = $("palette-input"); inp.value = ""; palFiltered = COMMANDS; palIndex = 0; renderPalette(); inp.focus(); }
+  function closePalette() { $("palette").hidden = true; }
+  function renderPalette() {
+    $("palette-list").innerHTML = palFiltered.map((c, i) => '<li class="' + (i === palIndex ? "active" : "") + '" data-cmd="' + i + '"><span class="pi">' + ICONS[c.icon] + '</span><span>' + esc(c.label) + '</span></li>').join("") || '<li><span class="pi">' + ICONS.search + '</span><span>Nenhum comando</span></li>';
+    $("palette-list").querySelectorAll("[data-cmd]").forEach((li) => li.addEventListener("click", () => runPalette(Number(li.dataset.cmd))));
+  }
+  function runPalette(i) { const c = palFiltered[i]; closePalette(); if (c) c.run(); }
+
+  // ------------------------------- Tema ---------------------------- //
+  function toggleTheme() {
+    const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("adsignage_studio_theme", next);
+    const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.setAttribute("content", next === "dark" ? "#1a1b26" : "#e6e7ed");
+    toast({ kind: "info", msg: "Tema " + (next === "dark" ? "escuro" : "claro") + " ativado.", timeout: 1500 });
+  }
+
+  // --------------------------- Render geral ------------------------ //
+  function renderAll() { renderActivity(); renderMenu(); renderSidebar(); renderTabs(); renderDoc(); renderInspector(); renderBottom(); renderStatus(); }
+
+  // ----------------------------- Auth ------------------------------ //
+  function showApp() { $("login").classList.add("hidden"); $("ide").classList.remove("hidden"); loadAll(); }
+  function logout() { token = null; localStorage.removeItem(TOKEN_KEY); $("ide").classList.add("hidden"); $("login").classList.remove("hidden"); }
+
+  // --------------------------- Inicializacao ----------------------- //
+  function init() {
+    document.documentElement.setAttribute("data-theme", localStorage.getItem("adsignage_studio_theme") || "dark");
+    $("brand-mark").innerHTML = ICONS.logo;
+    $("login-mark").innerHTML = ICONS.logo;
+    $("cmd-open-icon").innerHTML = ICONS.search;
+    $("logout-icon").innerHTML = ICONS.power;
+
+    $("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const password = $("login-password").value; const errEl = $("login-error"); errEl.textContent = "";
+      try {
+        const resp = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+        if (!resp.ok) throw new Error("Senha incorreta.");
+        const json = await resp.json(); token = json.token; localStorage.setItem(TOKEN_KEY, token); showApp();
+      } catch (err) { errEl.textContent = err.message; }
+    });
+    $("logout").addEventListener("click", logout);
+    $("cmd-open").addEventListener("click", openPalette);
+    $("palette").addEventListener("click", (e) => { if (e.target === $("palette")) closePalette(); });
+    $("palette-input").addEventListener("input", (e) => { const q = e.target.value.toLowerCase(); palFiltered = COMMANDS.filter((c) => c.label.toLowerCase().includes(q)); palIndex = 0; renderPalette(); });
+    $("palette-input").addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") { e.preventDefault(); palIndex = Math.min(palIndex + 1, palFiltered.length - 1); renderPalette(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); palIndex = Math.max(palIndex - 1, 0); renderPalette(); }
+      else if (e.key === "Enter") { e.preventDefault(); runPalette(palIndex); }
+    });
+    document.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); if ($("login").classList.contains("hidden")) { $("palette").hidden ? openPalette() : closePalette(); } }
+      else if (e.key === "Escape") closePalette();
+    });
+
+    if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+
+    setInterval(() => { if (token && !isDragging && $("palette").hidden && state.activeSection === "screens") { loadScreens().then(() => { renderSidebar(); renderStatus(); }).catch(() => {}); } }, 30000);
+
+    if (token) showApp(); else logout();
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
 })();
