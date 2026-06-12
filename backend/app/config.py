@@ -180,7 +180,7 @@ class Settings:
         # Em desenvolvimento, apenas avisa no log padrão.
         import logging
 
-        logging.getLogger("adsignage.config").warning(message)
+        logging.getLogger("tvmedia.config").warning(message)
 
 
 @lru_cache

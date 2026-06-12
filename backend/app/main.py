@@ -1,4 +1,4 @@
-"""Ponto de entrada da aplicação FastAPI do AdSignage.
+"""Ponto de entrada da aplicação FastAPI do tvMedia.
 
 Responsabilidades:
 
@@ -41,7 +41,7 @@ from .routers import (
     zones,
 )
 
-logger = logging.getLogger("adsignage")
+logger = logging.getLogger("tvmedia")
 
 
 @asynccontextmanager

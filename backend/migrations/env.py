@@ -1,4 +1,4 @@
-"""Ambiente de execução das migrações Alembic do AdSignage.
+"""Ambiente de execução das migrações Alembic do tvMedia.
 
 Resolve a URL do banco a partir de ``app.config.settings`` (respeitando a
 variável de ambiente ``DATABASE_URL``) e usa ``Base.metadata`` como metadados
