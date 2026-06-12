@@ -109,7 +109,9 @@ async def update_media(
     return media
 
 
-@router.delete("/{media_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{media_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None
+)
 async def delete_media(media_id: int, db: Session = Depends(get_db)) -> None:
     """Remove uma mídia e o arquivo associado (se houver)."""
     media = crud.get_media(db, media_id)

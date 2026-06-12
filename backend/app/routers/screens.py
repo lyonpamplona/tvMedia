@@ -61,7 +61,9 @@ async def update_screen(
     return screen
 
 
-@router.delete("/{screen_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{screen_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None
+)
 def delete_screen(screen_id: int, db: Session = Depends(get_db)) -> None:
     """Remove uma tela."""
     screen = crud.get_screen(db, screen_id)
