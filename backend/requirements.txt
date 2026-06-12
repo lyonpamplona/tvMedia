@@ -1,10 +1,7 @@
-# Dependências do backend tvMedia (FastAPI).
+# Dependências do backend AdSignage (FastAPI).
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 SQLAlchemy==2.0.36
 pydantic==2.10.4
 python-dotenv==1.0.1
 python-multipart==0.0.20
-alembic==1.14.0
-Pillow>=10.0.0
-
