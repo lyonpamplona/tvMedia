@@ -1,4 +1,4 @@
-# AdSignage — Relatório Técnico
+# tvMedia — Relatório Técnico
 
 **Data:** 12/06/2026  
 **Escopo:** varredura completa de backend, frontend e infraestrutura.  

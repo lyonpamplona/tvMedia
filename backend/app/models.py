@@ -1,4 +1,4 @@
-"""Modelos ORM (SQLAlchemy) do AdSignage.
+"""Modelos ORM (SQLAlchemy) do tvMedia.
 
 Domínio:
 

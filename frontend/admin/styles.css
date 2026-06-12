@@ -429,10 +429,10 @@ kbd {
 @media (max-width: 880px) {
   :root { --sidebar-w: 0px; }
   .sidebar { display: none; }
-  .menu { display: none; }
   .cmd-label, .title-center { display: none; }
 }
 @media (max-width: 600px) {
+  .menu { display: none; }
   .body { grid-template-columns: var(--activity-w) 1fr; }
   .doc { padding: 12px; }
 }
