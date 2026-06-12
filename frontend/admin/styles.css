@@ -71,6 +71,10 @@ body {
   text-rendering: optimizeLegibility;
 }
 .hidden { display: none !important; }
+/* Garante que o atributo nativo [hidden] vença regras de display por classe
+   (ex.: .palette-overlay { display: flex }). Sem isto, a paleta de comandos
+   vaza sobre a tela de login. */
+[hidden] { display: none !important; }
 button { font-family: inherit; color: inherit; cursor: pointer; }
 input, select, textarea { font-family: inherit; }
 svg { width: 1em; height: 1em; display: block; }
