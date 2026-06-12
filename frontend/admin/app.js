@@ -1,5 +1,5 @@
 /**
- * AdSignage Studio - painel de edicao profissional (estilo IDE) para
+ * tvMedia Studio - painel de edicao profissional (estilo IDE) para
  * sinalizacao digital, conectado a API real do backend.
  *
  * Layout: barra de titulo + menu, barra de atividades, explorer em arvore,
@@ -290,10 +290,90 @@
     bar.querySelector('[data-act="settings"]').addEventListener("click", () => toast({ kind: "info", title: "Configuracoes", msg: "Tema, PWA e sessao ficam na barra de atividades e titulo." }));
   }
 
+  // Menus suspensos estilo VS Code (Projeto / Editar / Visualizar / Ajuda).
+  // Cada guia abre um menu ancorado abaixo do botao, em vez da paleta.
+  let openMenuIndex = null;
+  let menuData = [];
+
+  function closeMenu() {
+    openMenuIndex = null;
+    const host = $("menu");
+    if (!host) return;
+    host.querySelectorAll(".menu-dropdown").forEach((d) => { d.hidden = true; });
+    host.querySelectorAll(".menu-top").forEach((b) => b.classList.remove("active"));
+  }
+
+  function toggleMenu(mi) {
+    const host = $("menu");
+    if (!host) return;
+    if (openMenuIndex === mi) { closeMenu(); return; }
+    closeMenu();
+    openMenuIndex = mi;
+    const drop = host.querySelector('[data-drop="' + mi + '"]');
+    const top = host.querySelector('[data-mtop="' + mi + '"]');
+    if (drop) drop.hidden = false;
+    if (top) top.classList.add("active");
+  }
+
+  function previewCurrent() {
+    const s = screen();
+    if (!s) { toast({ kind: "warn", msg: "Selecione uma tela primeiro." }); return; }
+    window.open(playerUrl(s.slug), "_blank", "noopener");
+  }
+
   function renderMenu() {
-    const items = ["Projeto", "Editar", "Visualizar", "Ajuda"];
-    $("menu").innerHTML = items.map((m) => '<button data-menu="' + m + '">' + m + '</button>').join("");
-    $("menu").querySelectorAll("[data-menu]").forEach((b) => b.addEventListener("click", () => openPalette()));
+    menuData = [
+      { name: "Projeto", items: [
+        { label: "Nova tela", run: () => handleSideAct("add-screen") },
+        { label: "Nova playlist", run: () => handleSideAct("add-playlist") },
+        { sep: true },
+        { label: "Recarregar dados", run: () => handleSideAct("reload") },
+        { sep: true },
+        { label: "Sair", run: () => logout() },
+      ] },
+      { name: "Editar", items: [
+        { label: "Pre-visualizar player", run: () => previewCurrent() },
+        { sep: true },
+        { label: "Alternar tema claro/escuro", run: () => toggleTheme() },
+      ] },
+      { name: "Visualizar", items: [
+        { label: "Telas", run: () => goSection("screens") },
+        { label: "Midias", run: () => goSection("media") },
+        { label: "Playlists", run: () => goSection("playlists") },
+        { label: "Agendamentos", run: () => goSection("schedules") },
+        { sep: true },
+        { label: "Paleta de comandos", kbd: "Ctrl K", run: () => openPalette() },
+      ] },
+      { name: "Ajuda", items: [
+        { label: "Guia de uso", run: () => openOnboard() },
+        { sep: true },
+        { label: "Saude das telas", run: () => reportHealth() },
+        { label: "Relatorio de exibicao", run: () => reportProofOfPlay() },
+      ] },
+    ];
+    const host = $("menu");
+    host.innerHTML = menuData.map((m, mi) =>
+      '<div class="menu-group" data-mi="' + mi + '">' +
+        '<button class="menu-top" data-mtop="' + mi + '">' + m.name + '</button>' +
+        '<div class="menu-dropdown" data-drop="' + mi + '" role="menu" hidden>' +
+          m.items.map((it, ii) => it.sep
+            ? '<div class="menu-sep"></div>'
+            : '<button class="menu-opt" role="menuitem" data-mi="' + mi + '" data-ii="' + ii + '"><span>' + it.label + '</span>' + (it.kbd ? '<kbd>' + it.kbd + '</kbd>' : '') + '</button>'
+          ).join("") +
+        '</div>' +
+      '</div>'
+    ).join("");
+    host.querySelectorAll("[data-mtop]").forEach((b) => {
+      const mi = Number(b.dataset.mtop);
+      b.addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(mi); });
+      b.addEventListener("mouseenter", () => { if (openMenuIndex !== null && openMenuIndex !== mi) toggleMenu(mi); });
+    });
+    host.querySelectorAll(".menu-opt").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const it = menuData[Number(b.dataset.mi)].items[Number(b.dataset.ii)];
+      closeMenu();
+      if (it && it.run) it.run();
+    }));
   }
 
   // ----------------------------- Sidebar --------------------------- //
@@ -737,7 +817,7 @@
   // pode ser reaberto a qualquer momento pela paleta de comandos.
   const ONBOARD_KEY = "adsignage_onboarded";
   const TOUR = [
-    { icon: "logo", title: "Bem-vindo ao AdSignage Studio", text: "Este painel controla o que aparece nas suas TVs. Em poucos passos voce cria uma tela, envia midias, monta uma sequencia e publica. Use Anterior e Proximo para navegar neste guia." },
+    { icon: "logo", title: "Bem-vindo ao tvMedia Studio", text: "Este painel controla o que aparece nas suas TVs. Em poucos passos voce cria uma tela, envia midias, monta uma sequencia e publica. Use Anterior e Proximo para navegar neste guia." },
     { icon: "screen", title: "1. Telas", text: "Cada tela representa uma TV. Na secao Telas voce cria a tela e desenha Zonas: areas onde o conteudo aparece. Arraste e redimensione as zonas direto no canvas, como caixas na tela." },
     { icon: "media", title: "2. Midias", text: "Na secao Midias voce envia imagens e videos do seu computador, ou cadastra links (YouTube, paginas web, musica). Tudo o que sera exibido fica guardado aqui para reaproveitar." },
     { icon: "playlist", title: "3. Playlists", text: "Uma playlist e a sequencia de midias que toca em loop. Defina a duracao de cada item, o efeito de transicao, o modo de ajuste (cobrir ou conter) e o audio. Depois ligue a playlist a uma zona da tela." },
@@ -814,8 +894,10 @@
     });
     document.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); if ($("login").classList.contains("hidden")) { $("palette").hidden ? openPalette() : closePalette(); } }
-      else if (e.key === "Escape") closePalette();
+      else if (e.key === "Escape") { closePalette(); closeMenu(); }
     });
+    // Fecha os menus suspensos ao clicar em qualquer lugar fora deles.
+    document.addEventListener("click", (e) => { if (openMenuIndex !== null && !e.target.closest(".menu-group")) closeMenu(); });
 
     if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 

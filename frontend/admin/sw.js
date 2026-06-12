@@ -1,12 +1,12 @@
 /**
- * Service worker do AdSignage Studio (painel admin).
+ * Service worker do tvMedia Studio (painel admin).
  *
  * Estrategia:
  *  - Estaticos do painel: cache-first (carregamento instantaneo e offline).
  *  - Chamadas /api/ e /media/: network-first (dados sempre atuais).
  */
 
-const CACHE = "adsignage-studio-v2";
+const CACHE = "tvmedia-studio-v3";
 const ASSETS = [
   "./",
   "./index.html",

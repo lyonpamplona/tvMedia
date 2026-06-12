@@ -1,5 +1,5 @@
 /*
- * AdSignage Studio - tema minimal estilo IDE (Tokyo Night / VS Code).
+ * tvMedia Studio - tema minimal estilo IDE (Tokyo Night / VS Code).
  *
  * Sem cromo do macOS (sem semaforos), superficies planas, bordas discretas,
  * tipografia monoespacada para metadados. Tokens de cor para tema escuro
@@ -128,12 +128,29 @@ kbd {
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--fg-strong); font-size: 13px; white-space: nowrap; }
 .brand b { color: var(--accent); font-weight: 700; }
 .brand-mark { width: 18px; height: 18px; color: var(--accent); font-size: 18px; }
-.menu { display: flex; gap: 1px; }
-.menu button {
+.menu { display: flex; gap: 1px; position: relative; }
+.menu-group { position: relative; }
+.menu-top {
   background: transparent; border: 0; padding: 5px 9px; border-radius: var(--radius-sm);
   color: var(--muted); font-size: 12.5px;
 }
-.menu button:hover { background: var(--panel-2); color: var(--fg); }
+.menu-top:hover, .menu-top.active { background: var(--panel-2); color: var(--fg); }
+/* Menu suspenso ancorado abaixo da guia (estilo barra de menus do VS Code). */
+.menu-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; min-width: 224px;
+  background: var(--elev); border: 1px solid var(--border-2); border-radius: 8px;
+  box-shadow: var(--shadow); padding: 5px; z-index: 500;
+  animation: menu-in .12s ease;
+}
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.menu-opt {
+  display: flex; align-items: center; justify-content: space-between; gap: 24px; width: 100%;
+  background: transparent; border: 0; padding: 7px 10px; border-radius: 6px;
+  color: var(--fg); font-size: 12.5px; text-align: left; white-space: nowrap;
+}
+.menu-opt:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--fg-strong); }
+.menu-opt kbd { font-family: var(--mono); flex: none; }
+.menu-sep { height: 1px; background: var(--border); margin: 5px 6px; }
 .title-center { flex: 1; text-align: center; color: var(--faint); font-size: 12px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .title-actions { display: flex; align-items: center; gap: 8px; }
 .cmd-open {
