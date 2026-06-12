@@ -6,7 +6,7 @@
  *  - Chamadas /api/ e /media/: network-first (dados sempre atuais).
  */
 
-const CACHE = "adsignage-studio-v1";
+const CACHE = "adsignage-studio-v2";
 const ASSETS = [
   "./",
   "./index.html",

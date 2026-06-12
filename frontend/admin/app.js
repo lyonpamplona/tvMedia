@@ -597,6 +597,7 @@
     { icon: "eye", label: "Pre-visualizar player da tela atual", run: () => { const s = screen(); if (s) window.open(playerUrl(s.slug), "_blank"); } },
     { icon: "refresh", label: "Recarregar dados", run: () => loadAll() },
     { icon: "sun", label: "Alternar tema claro/escuro", run: () => toggleTheme() },
+    { icon: "info", label: "Abrir guia de uso (tutorial)", run: () => openOnboard() },
     { icon: "power", label: "Sair (logout)", run: () => logout() },
   ];
   let palIndex = 0, palFiltered = COMMANDS;
@@ -608,6 +609,36 @@
     $("palette-list").querySelectorAll("[data-cmd]").forEach((li) => li.addEventListener("click", () => runPalette(Number(li.dataset.cmd))));
   }
   function runPalette(i) { const c = palFiltered[i]; closePalette(); if (c) c.run(); }
+
+  // --------------------------- Onboarding -------------------------- //
+  // Guia de uso exibido automaticamente nas primeiras vezes que o painel e
+  // acessado. O estado fica em localStorage para nao reabrir a cada visita;
+  // pode ser reaberto a qualquer momento pela paleta de comandos.
+  const ONBOARD_KEY = "adsignage_onboarded";
+  const TOUR = [
+    { icon: "logo", title: "Bem-vindo ao AdSignage Studio", text: "Este painel controla o que aparece nas suas TVs. Em poucos passos voce cria uma tela, envia midias, monta uma sequencia e publica. Use Anterior e Proximo para navegar neste guia." },
+    { icon: "screen", title: "1. Telas", text: "Cada tela representa uma TV. Na secao Telas voce cria a tela e desenha Zonas: areas onde o conteudo aparece. Arraste e redimensione as zonas direto no canvas, como caixas na tela." },
+    { icon: "media", title: "2. Midias", text: "Na secao Midias voce envia imagens e videos do seu computador, ou cadastra links (YouTube, paginas web, musica). Tudo o que sera exibido fica guardado aqui para reaproveitar." },
+    { icon: "playlist", title: "3. Playlists", text: "Uma playlist e a sequencia de midias que toca em loop. Defina a duracao de cada item, o efeito de transicao, o modo de ajuste (cobrir ou conter) e o audio. Depois ligue a playlist a uma zona da tela." },
+    { icon: "clock", title: "4. Agendamentos", text: "Quer conteudos diferentes por horario ou dia da semana? Em Agendamentos voce define quando cada playlist toca em cada zona. Sem agendamento, a playlist padrao da zona e usada o tempo todo." },
+    { icon: "eye", title: "5. Publicar na TV", text: "Abra a tela, copie o link do player e abra esse link no navegador da TV (ou use o botao Pre-visualizar). As mudancas feitas aqui aparecem na TV ao vivo, sem precisar recarregar a pagina." },
+    { icon: "search", title: "Dica final", text: "Pressione Ctrl+K a qualquer momento para abrir a paleta de comandos e ir direto a qualquer acao. Para rever este guia depois, procure por 'Abrir guia de uso' na paleta. Bom trabalho!" },
+  ];
+  let tourIndex = 0;
+  function renderOnboard() {
+    const s = TOUR[tourIndex];
+    $("onboard-figure").innerHTML = ICONS[s.icon] || ICONS.info;
+    $("onboard-step").textContent = "Passo " + (tourIndex + 1) + " de " + TOUR.length;
+    $("onboard-title").textContent = s.title;
+    $("onboard-text").textContent = s.text;
+    $("onboard-dots").innerHTML = TOUR.map((_, i) => '<span class="dot ' + (i === tourIndex ? "on" : "") + '" data-dot="' + i + '"></span>').join("");
+    $("onboard-dots").querySelectorAll("[data-dot]").forEach((d) => d.addEventListener("click", () => { tourIndex = Number(d.dataset.dot); renderOnboard(); }));
+    $("onboard-prev").disabled = tourIndex === 0;
+    $("onboard-next").textContent = tourIndex === TOUR.length - 1 ? "Concluir" : "Proximo";
+  }
+  function openOnboard() { tourIndex = 0; $("onboard").hidden = false; renderOnboard(); }
+  function closeOnboard() { $("onboard").hidden = true; localStorage.setItem(ONBOARD_KEY, "1"); }
+  function maybeOnboard() { if (!localStorage.getItem(ONBOARD_KEY)) setTimeout(openOnboard, 450); }
 
   // ------------------------------- Tema ---------------------------- //
   function toggleTheme() {
@@ -622,7 +653,7 @@
   function renderAll() { renderActivity(); renderMenu(); renderSidebar(); renderTabs(); renderDoc(); renderInspector(); renderBottom(); renderStatus(); }
 
   // ----------------------------- Auth ------------------------------ //
-  function showApp() { $("login").classList.add("hidden"); $("ide").classList.remove("hidden"); loadAll(); }
+  function showApp() { $("login").classList.add("hidden"); $("ide").classList.remove("hidden"); loadAll(); maybeOnboard(); }
   function logout() { token = null; localStorage.removeItem(TOKEN_KEY); $("ide").classList.add("hidden"); $("login").classList.remove("hidden"); }
 
   // --------------------------- Inicializacao ----------------------- //
@@ -643,6 +674,10 @@
       } catch (err) { errEl.textContent = err.message; }
     });
     $("logout").addEventListener("click", logout);
+    $("onboard-skip").addEventListener("click", closeOnboard);
+    $("onboard-prev").addEventListener("click", () => { if (tourIndex > 0) { tourIndex--; renderOnboard(); } });
+    $("onboard-next").addEventListener("click", () => { if (tourIndex < TOUR.length - 1) { tourIndex++; renderOnboard(); } else { closeOnboard(); } });
+    $("onboard").addEventListener("click", (e) => { if (e.target === $("onboard")) closeOnboard(); });
     $("cmd-open").addEventListener("click", openPalette);
     $("palette").addEventListener("click", (e) => { if (e.target === $("palette")) closePalette(); });
     $("palette-input").addEventListener("input", (e) => { const q = e.target.value.toLowerCase(); palFiltered = COMMANDS.filter((c) => c.label.toLowerCase().includes(q)); palIndex = 0; renderPalette(); });
