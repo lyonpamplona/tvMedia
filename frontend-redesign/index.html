@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AdSignage — Painel (redesign)</title>
+  <meta name="description" content="Painel de sinalização digital autohospedado" />
+
+  <!-- PWA -->
+  <meta name="theme-color" content="#6d28d9" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="AdSignage" />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar"></aside>
+
+    <header class="topbar">
+      <button class="icon-btn only-mobile" id="menu-btn" aria-label="Menu">☰</button>
+      <div class="brand">
+        <span class="brand-mark">A</span>
+        <span class="brand-name">AdSignage</span>
+      </div>
+      <div class="topbar-actions">
+        <span class="install-hint" id="install-hint" hidden>Instalar app</span>
+        <button class="icon-btn" id="theme-btn" aria-label="Tema">◐</button>
+      </div>
+    </header>
+
+    <main class="main" id="view" tabindex="-1"></main>
+
+    <nav class="bottom-nav" id="bottom-nav"></nav>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

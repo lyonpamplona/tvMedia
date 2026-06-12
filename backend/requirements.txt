@@ -1,14 +1,7 @@
-# Dependências do backend tvMedia (FastAPI).
+# Dependências do backend AdSignage (FastAPI).
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 SQLAlchemy==2.0.36
 pydantic==2.10.4
 python-dotenv==1.0.1
 python-multipart==0.0.20
-alembic==1.14.0
-# Opcional (recomendado): reescala/otimizacao de imagens no servidor.
-# Sem o Pillow, o processamento de imagem e ignorado com seguranca.
-Pillow>=10.0.0
-# Observacao: a transcodificacao de video usa os binarios de sistema
-# 'ffmpeg' e 'ffprobe' (instale via gerenciador de pacotes do SO; ex.:
-# 'apt install ffmpeg'). Sem eles, o video e servido sem transcodificar.
