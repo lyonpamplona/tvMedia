@@ -13,6 +13,10 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    # Teto de memória do container (Compose v2, modo não-swarm). Protege o host
+    # (ex.: Raspberry Pi 4 com 4 GB) de ter toda a RAM consumida pela aplicação.
+    mem_limit: 512m
+    mem_reservation: 256m
     environment:
       APP_NAME: AdSignage
       DEBUG: "false"
@@ -23,6 +27,9 @@ services:
       FRONTEND_DIR: /app/frontend
       MAX_UPLOAD_MB: "200"
       CORS_ORIGINS: "*"
+      # Perfil enxuto de execução.
+      WEB_CONCURRENCY: "1"
+      MALLOC_ARENA_MAX: "2"
     volumes:
       # Dados persistentes (banco + mídias).
       - adsignage_data:/app/data

@@ -3,7 +3,11 @@ FROM python:3.12-slim
 
 # Evita arquivos .pyc e garante logs sem buffer.
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    # Limita o número de arenas do alocador glibc, reduzindo o consumo de RAM
+    # em máquinas multi-core (ex.: Raspberry Pi 4).
+    MALLOC_ARENA_MAX=2 \
+    WEB_CONCURRENCY=1
 
 WORKDIR /app
 
@@ -19,5 +23,6 @@ RUN mkdir -p /app/data/media
 
 EXPOSE 8000
 
-# Sobe o servidor. Em produção, ajuste --workers conforme a máquina.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Sobe o servidor com perfil enxuto: 1 worker, concorrência limitada e
+# keep-alive curto. Em máquinas mais potentes, aumente --workers/--limit-concurrency.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--limit-concurrency", "64", "--timeout-keep-alive", "5"]
