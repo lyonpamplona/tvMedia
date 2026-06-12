@@ -51,6 +51,10 @@
     down: S('<path d="m6 9 6 6 6-6"/>'),
     power: S('<path d="M12 2v10M18.4 6.6a9 9 0 1 1-12.8 0"/>'),
     upload: S('<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>'),
+    folder: S('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+    user: S('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'),
+    lock: S('<rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
+    tag: S('<path d="M3 3h8l10 10-8 8L3 11z"/><circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" stroke="none"/>'),
   };
 
   const TYPE_ICON = { image: "image", video: "video", text: "text", html: "code", url: "link", youtube: "youtube", embed: "music" };
@@ -69,6 +73,11 @@
     media: [],
     playlists: [],
     screens: [],
+    folders: [],
+    users: [],
+    user: null,
+    mediaQuery: "",
+    mediaFolder: "all",
     activeSection: "screens",
     activeScreenId: null,
     selectedZoneId: null,
@@ -160,6 +169,7 @@
   async function loadAll() {
     try {
       await Promise.all([loadMedia(), loadPlaylists(), loadScreens()]);
+      try { state.folders = await loadFolders(); } catch (e) { state.folders = []; }
       fixSelection();
       renderAll();
     } catch (err) { toast({ kind: "err", msg: err.message }); }
@@ -287,7 +297,7 @@
       '<button class="act" data-act="settings" title="Configuracoes">' + ICONS.settings + '</button>';
     bar.querySelectorAll("[data-sec]").forEach((b) => b.addEventListener("click", () => { state.activeSection = b.dataset.sec; renderActivity(); renderSidebar(); renderTabs(); renderDoc(); renderInspector(); renderBottom(); }));
     bar.querySelector('[data-act="theme"]').addEventListener("click", toggleTheme);
-    bar.querySelector('[data-act="settings"]').addEventListener("click", () => toast({ kind: "info", title: "Configuracoes", msg: "Tema, PWA e sessao ficam na barra de atividades e titulo." }));
+    bar.querySelector('[data-act="settings"]').addEventListener("click", openSettings);
   }
 
   // Menus suspensos estilo VS Code (Projeto / Editar / Visualizar / Ajuda).
@@ -384,13 +394,14 @@
   function renderSidebar() {
     const sb = $("sidebar");
     if (state.activeSection === "screens") {
-      sb.innerHTML = sideHead("Telas", [{ act: "add-screen", icon: "plus", title: "Nova tela" }, { act: "reload", icon: "refresh", title: "Recarregar" }]) +
+      sb.innerHTML = sideHead("Telas", [{ act: "add-screen", icon: "plus", title: "Nova tela" }, { act: "preview", icon: "eye", title: "Pre-visualizar tela" }, { act: "reload", icon: "refresh", title: "Recarregar" }]) +
         '<div class="tree"><div class="tree-group"><div class="tree-label" data-toggle><span class="chev">' + ICONS.chevron + '</span><span>Dispositivos</span></div><div class="tree-children">' +
         (state.screens.length ? state.screens.map((s) => '<div class="tree-item ' + (s.id === state.activeScreenId ? "active" : "") + '" data-screen="' + s.id + '"><span class="dot ' + (isOnline(s) ? "on" : "off") + '"></span><span class="name">' + esc(s.name) + '</span><span class="tag">' + s.zones.length + 'z</span></div>').join("") : '<div class="empty">Nenhuma tela.</div>') +
         '</div></div></div>';
     } else if (state.activeSection === "media") {
-      sb.innerHTML = sideHead("Midias", [{ act: "reload", icon: "refresh", title: "Recarregar" }]) +
-        '<div class="tree">' + (state.media.length ? state.media.map((m) => '<div class="tree-item ' + (m.id === state.selectedMediaId ? "active" : "") + '" data-media="' + m.id + '">' + ICONS[TYPE_ICON[m.type]] + '<span class="name">' + esc(m.name) + '</span><span class="tag">' + TYPE_LABEL[m.type] + '</span></div>').join("") : '<div class="empty">Nenhuma midia.</div>') + '</div>';
+      const list = filteredMedia();
+      sb.innerHTML = sideHead("Midias", [{ act: "add-media", icon: "plus", title: "Nova midia" }, { act: "bulk-import", icon: "link", title: "Importar URLs em massa" }, { act: "new-folder", icon: "folder", title: "Nova pasta" }, { act: "reload", icon: "refresh", title: "Recarregar" }]) +
+        '<div class="tree">' + (list.length ? list.map((m) => '<div class="tree-item ' + (m.id === state.selectedMediaId ? "active" : "") + '" data-media="' + m.id + '">' + ICONS[TYPE_ICON[m.type]] + '<span class="name">' + esc(m.name) + '</span><span class="tag">' + TYPE_LABEL[m.type] + '</span></div>').join("") : '<div class="empty">' + (state.media.length ? "Nada encontrado para os filtros." : "Nenhuma midia. Use + para adicionar.") + '</div>') + '</div>';
     } else if (state.activeSection === "playlists") {
       sb.innerHTML = sideHead("Playlists", [{ act: "add-playlist", icon: "plus", title: "Nova playlist" }, { act: "reload", icon: "refresh", title: "Recarregar" }]) +
         '<div class="tree">' + (state.playlists.length ? state.playlists.map((p) => '<div class="tree-item ' + (p.id === state.openPlaylistId ? "active" : "") + '" data-playlist="' + p.id + '">' + ICONS.playlist + '<span class="name">' + esc(p.name) + '</span><span class="tag">' + p.items.length + '</span></div>').join("") : '<div class="empty">Nenhuma playlist.</div>') + '</div>';
@@ -424,7 +435,10 @@
       } else if (act === "add-playlist") {
         const created = await api("/api/playlists", { method: "POST", body: JSON.stringify({ name: "Nova playlist" }) });
         await loadPlaylists(); state.openPlaylistId = created.id; renderSidebar(); renderTabs(); renderDoc(); toast({ kind: "ok", msg: "Playlist criada." });
-      }
+      } else if (act === "add-media") { openMediaModal(); }
+      else if (act === "bulk-import") { openBulkModal(); }
+      else if (act === "new-folder") { await createFolder(); }
+      else if (act === "preview") { const s = screen(); if (s) window.open(playerUrl(s.id), "_blank"); else toast({ kind: "warn", msg: "Selecione uma tela primeiro." }); }
     } catch (err) { toast({ kind: "err", msg: err.message }); }
   }
 
@@ -598,64 +612,276 @@
   async function deleteSchedule(zoneId, schedId) { try { await api("/api/zones/" + zoneId + "/schedules/" + schedId, { method: "DELETE" }); await loadScreens(); renderInspector(); renderBottom(); toast({ kind: "warn", msg: "Agendamento removido." }); } catch (err) { toast({ kind: "err", msg: err.message }); } }
 
   // ----------------------------- Midias ---------------------------- //
+  // ============================ Midias ============================== //
+  function folderName(id) { const f = state.folders.find((x) => x.id === id); return f ? f.name : null; }
+  function mediaFolderOptions(sel) {
+    return '<option value="all"' + (sel === "all" ? " selected" : "") + '>Todas as pastas</option>' +
+      '<option value="none"' + (sel === "none" ? " selected" : "") + '>Sem pasta</option>' +
+      state.folders.map((f) => '<option value="' + f.id + '"' + (String(sel) === String(f.id) ? " selected" : "") + '>' + esc(f.name) + '</option>').join("");
+  }
+  function filteredMedia() {
+    const q = (state.mediaQuery || "").trim().toLowerCase();
+    return state.media.filter((m) => {
+      if (state.mediaFolder === "none" && m.folder_id != null) return false;
+      if (state.mediaFolder !== "all" && state.mediaFolder !== "none" && String(m.folder_id) !== String(state.mediaFolder)) return false;
+      if (!q) return true;
+      return (m.name + " " + (m.tags || []).join(" ") + " " + (TYPE_LABEL[m.type] || "")).toLowerCase().indexOf(q) !== -1;
+    });
+  }
   function renderMediaDoc() {
-    const typeOpts = Object.keys(TYPE_LABEL).map((t) => '<option value="' + t + '">' + TYPE_LABEL[t] + '</option>').join("");
-    const form = '<div class="item-row row wrap" style="gap:10px;margin-bottom:14px"><input id="m-name" placeholder="Nome da midia" style="flex:1;min-width:160px"/><select id="m-type">' + typeOpts + '</select><input id="m-file" type="file" accept="image/*,video/*"/><input id="m-value" placeholder="Texto, HTML ou URL" class="hidden" style="flex:1;min-width:160px"/><button class="btn primary small" id="m-add">' + ICONS.plus + ' Adicionar</button></div>';
-    const grid = state.media.length ? '<div class="media-grid">' + state.media.map(mediaCard).join("") + '</div>' : '<div class="empty">Nenhuma midia cadastrada.</div>';
-    return form + grid;
+    return '<div class="doc-toolbar">' +
+      '<span class="side-search grow">' + ICONS.search + '<input id="media-search" placeholder="Buscar por nome ou tag..." value="' + esc(state.mediaQuery) + '"/></span>' +
+      '<select id="media-folder">' + mediaFolderOptions(state.mediaFolder) + '</select>' +
+      '<button class="btn ghost small" id="md-folder">' + ICONS.folder + ' Nova pasta</button>' +
+      '<button class="btn ghost small" id="md-bulk">' + ICONS.link + ' Importar URLs</button>' +
+      '<button class="btn primary small" id="md-add">' + ICONS.plus + ' Nova midia</button>' +
+      '</div><div id="media-grid-wrap">' + renderMediaGrid() + '</div>';
+  }
+  function renderMediaGrid() {
+    if (!state.media.length) {
+      return '<div class="empty-cta">' + ICONS.media +
+        '<h4>Sua biblioteca esta vazia</h4>' +
+        '<p>Adicione imagens, videos, textos ou links. Depois monte uma <b>playlist</b> e ligue-a a uma <b>zona</b> em <b>Telas</b> para exibir.</p>' +
+        '<button class="btn primary" id="cta-add">' + ICONS.plus + ' Adicionar primeira midia</button></div>';
+    }
+    const list = filteredMedia();
+    const hint = '<div class="next-hint">' + ICONS.info + '<span><b>Proximo passo:</b> adicione a midia a uma <b>Playlist</b> e ligue a playlist a uma <b>zona</b> da tela (secao Telas).</span></div>';
+    if (!list.length) return hint + '<div class="empty">Nada encontrado para os filtros atuais.</div>';
+    return hint + '<div class="media-grid">' + list.map(mediaCard).join("") + '</div>';
   }
   function mediaCard(m) {
     let thumb;
     if (m.type === "image" && m.path) thumb = '<div class="thumb"><img src="/media/' + esc(m.path) + '" alt=""/></div>';
     else if (m.type === "video" && m.path) thumb = '<div class="thumb"><video src="/media/' + esc(m.path) + '" muted></video></div>';
     else thumb = '<div class="thumb placeholder">' + ICONS[TYPE_ICON[m.type]] + '</div>';
-    return '<div class="media-card" data-mcard="' + m.id + '">' + thumb + '<div class="mc-body"><div class="mc-name">' + esc(m.name) + '</div><div class="mc-foot"><span class="tag">' + TYPE_LABEL[m.type] + '</span><button class="btn danger small" data-del-media="' + m.id + '">' + ICONS.trash + '</button></div></div></div>';
+    const fol = m.folder_id != null ? '<span class="chip">' + ICONS.folder + esc(folderName(m.folder_id) || "?") + '</span>' : "";
+    const tags = (m.tags || []).slice(0, 3).map((t) => '<span class="chip">' + esc(t) + '</span>').join("");
+    const meta = (fol || tags) ? '<div class="mc-meta">' + fol + tags + '</div>' : "";
+    return '<div class="media-card' + (m.id === state.selectedMediaId ? " sel" : "") + '" data-mcard="' + m.id + '">' + thumb + '<div class="mc-body"><div class="mc-name">' + esc(m.name) + '</div>' + meta + '<div class="mc-foot"><span class="tag">' + TYPE_LABEL[m.type] + '</span><button class="btn danger small" data-del-media="' + m.id + '">' + ICONS.trash + '</button></div></div></div>';
   }
   function bindMediaDoc() {
+    const search = $("media-search");
+    const refreshGrid = () => { const w = $("media-grid-wrap"); if (w) { w.innerHTML = renderMediaGrid(); bindMediaGrid(); } };
+    if (search) search.addEventListener("input", () => { state.mediaQuery = search.value; refreshGrid(); });
+    const fol = $("media-folder"); if (fol) fol.addEventListener("change", () => { state.mediaFolder = fol.value; refreshGrid(); });
+    const add = $("md-add"); if (add) add.addEventListener("click", openMediaModal);
+    const bulk = $("md-bulk"); if (bulk) bulk.addEventListener("click", openBulkModal);
+    const nf = $("md-folder"); if (nf) nf.addEventListener("click", createFolder);
+    bindMediaGrid();
+  }
+  function bindMediaGrid() {
     const doc = $("doc");
-    const typeSel = $("m-type"); const fileI = $("m-file"); const valI = $("m-value");
-    const sync = () => { const t = typeSel.value; const isFile = (t === "image" || t === "video"); fileI.classList.toggle("hidden", !isFile); valI.classList.toggle("hidden", isFile); };
-    sync(); typeSel.addEventListener("change", sync);
-    $("m-add").addEventListener("click", addMedia);
-    doc.querySelectorAll("[data-mcard]").forEach((c) => c.addEventListener("click", (e) => { if (e.target.closest("[data-del-media]")) return; state.selectedMediaId = Number(c.dataset.mcard); renderSidebar(); renderInspector(); }));
+    const cta = $("cta-add"); if (cta) cta.addEventListener("click", openMediaModal);
+    doc.querySelectorAll("[data-mcard]").forEach((c) => c.addEventListener("click", (e) => { if (e.target.closest("[data-del-media]")) return; state.selectedMediaId = Number(c.dataset.mcard); doc.querySelectorAll("[data-mcard]").forEach((x) => x.classList.toggle("sel", x === c)); renderSidebar(); renderInspector(); }));
     doc.querySelectorAll("[data-del-media]").forEach((b) => b.addEventListener("click", async () => { if (!(await confirmDialog({ title: "Excluir midia", message: "Tem certeza que deseja excluir esta midia?", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await api("/api/media/" + b.dataset.delMedia, { method: "DELETE" }); await loadMedia(); renderSidebar(); renderDoc(); toast({ kind: "warn", msg: "Midia excluida." }); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
   }
-  async function addMedia() {
-    const name = $("m-name").value.trim();
-    const type = $("m-type").value;
-    if (!name) { toast({ kind: "warn", msg: "Informe um nome." }); return; }
-    try {
-      if (type === "image" || type === "video") {
-        const file = $("m-file").files[0]; if (!file) { toast({ kind: "warn", msg: "Selecione um arquivo." }); return; }
-        const fd = new FormData(); fd.append("name", name); fd.append("file", file);
-        await api("/api/media/upload", { method: "POST", body: fd });
-      } else {
-        const value = $("m-value").value;
-        const body = { name, type };
-        if (type === "url" || type === "youtube" || type === "embed") body.source_url = value; else body.content = value;
-        await api("/api/media", { method: "POST", body: JSON.stringify(body) });
-      }
-      await loadMedia(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: "Midia adicionada." });
-    } catch (err) { toast({ kind: "err", msg: err.message }); }
+
+  // Overlay generico reutilizando as classes .modal-overlay / .modal.
+  function buildOverlay(modal) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add("show"));
+    let closed = false;
+    function onKey(e) { if (e.key === "Escape") { e.preventDefault(); close(); } }
+    const close = () => { if (closed) return; closed = true; overlay.classList.remove("show"); document.removeEventListener("keydown", onKey, true); setTimeout(() => overlay.remove(), 200); };
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
+    document.addEventListener("keydown", onKey, true);
+    return { overlay, close };
   }
+
+  // Modal guiado de Nova midia: escolha de tipo, campos contextuais e drag-and-drop.
+  function openMediaModal() {
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    modal.setAttribute("role", "dialog"); modal.setAttribute("aria-modal", "true");
+    let current = "image";
+    const typeBtns = Object.keys(TYPE_LABEL).map((t) => '<button class="type-pick" data-type="' + t + '">' + ICONS[TYPE_ICON[t]] + '<span>' + TYPE_LABEL[t] + '</span></button>').join("");
+    const folderOpts = '<option value="">Sem pasta</option>' + state.folders.map((f) => '<option value="' + f.id + '">' + esc(f.name) + '</option>').join("");
+    modal.innerHTML =
+      '<div class="modal-head"><span class="modal-ico">' + ICONS.media + '</span><span class="modal-title">Nova midia</span></div>' +
+      '<div class="modal-body">' +
+        '<label class="mm-label">1. Tipo de conteudo</label><div class="type-grid">' + typeBtns + '</div>' +
+        '<div class="field"><label>2. Nome</label><input id="mm-name" placeholder="Ex.: Promo de inverno"/></div>' +
+        '<div id="mm-dynamic"></div>' +
+        '<div class="row" style="gap:10px"><div class="field grow"><label>Pasta (opcional)</label><select id="mm-folder">' + folderOpts + '</select></div><div class="field grow"><label>Tags (separadas por virgula)</label><input id="mm-tags" placeholder="promo, inverno"/></div></div>' +
+      '</div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Cancelar</button><button class="btn primary" data-create>' + ICONS.check + ' Adicionar</button></div>';
+    const ui = buildOverlay(modal);
+    const dyn = modal.querySelector("#mm-dynamic");
+    const renderDynamic = () => {
+      if (current === "image" || current === "video") {
+        const label = current === "image" ? "a imagem" : "o video";
+        dyn.innerHTML = '<label class="mm-label">3. Arquivo</label><div class="dropzone" id="mm-drop"><div class="dz-inner">' + ICONS.upload + '<p>Arraste ' + label + ' aqui ou <b>clique para escolher</b></p><span class="dz-file" id="mm-file-name">Nenhum arquivo selecionado</span></div><input type="file" id="mm-file" accept="' + (current === "image" ? "image/*" : "video/*") + '" hidden/></div>';
+        const dz = modal.querySelector("#mm-drop"); const fi = modal.querySelector("#mm-file"); const fn = modal.querySelector("#mm-file-name");
+        const setName = () => { fn.textContent = fi.files[0] ? fi.files[0].name : "Nenhum arquivo selecionado"; };
+        dz.addEventListener("click", () => fi.click());
+        fi.addEventListener("change", setName);
+        ["dragover", "dragenter"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("over"); }));
+        ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("over"); }));
+        dz.addEventListener("drop", (e) => { if (e.dataTransfer.files[0]) { fi.files = e.dataTransfer.files; setName(); } });
+      } else if (current === "text" || current === "html") {
+        dyn.innerHTML = '<div class="field"><label>3. Conteudo ' + (current === "html" ? "(HTML)" : "(texto)") + '</label><textarea id="mm-value" rows="5" placeholder="' + (current === "html" ? "<h1>Ola</h1>" : "Digite o texto que aparecera na tela") + '"></textarea><span class="hint">' + (current === "html" ? "Aceita HTML simples. Evite scripts." : "Texto exibido em tela cheia na zona.") + '</span></div>';
+      } else {
+        const ph = current === "youtube" ? "https://youtube.com/watch?v=..." : (current === "embed" ? "https://... (pagina ou musica para incorporar)" : "https://exemplo.com");
+        const help = current === "youtube" ? "Cole o link do video do YouTube." : (current === "embed" ? "Pagina ou conteudo incorporavel." : "Pagina web que sera exibida.");
+        dyn.innerHTML = '<div class="field"><label>3. URL de origem</label><input id="mm-value" placeholder="' + ph + '"/><span class="hint">' + help + '</span></div>';
+      }
+    };
+    const setType = (t) => { current = t; modal.querySelectorAll(".type-pick").forEach((b) => b.classList.toggle("active", b.dataset.type === t)); renderDynamic(); };
+    modal.querySelectorAll(".type-pick").forEach((b) => b.addEventListener("click", () => setType(b.dataset.type)));
+    setType("image");
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    modal.querySelector("[data-create]").addEventListener("click", async () => {
+      const name = modal.querySelector("#mm-name").value.trim();
+      if (!name) { toast({ kind: "warn", msg: "Informe um nome." }); return; }
+      const folderId = modal.querySelector("#mm-folder").value;
+      const tags = modal.querySelector("#mm-tags").value;
+      try {
+        if (current === "image" || current === "video") {
+          const file = modal.querySelector("#mm-file").files[0];
+          if (!file) { toast({ kind: "warn", msg: "Selecione um arquivo." }); return; }
+          const fd = new FormData(); fd.append("name", name); fd.append("file", file);
+          if (folderId) fd.append("folder_id", folderId);
+          if (tags.trim()) fd.append("tags", tags);
+          await api("/api/media/upload", { method: "POST", body: fd });
+        } else {
+          const value = modal.querySelector("#mm-value").value;
+          const body = { name, type: current, tags: tags.split(",").map((s) => s.trim()).filter(Boolean) };
+          if (folderId) body.folder_id = Number(folderId);
+          if (current === "url" || current === "youtube" || current === "embed") body.source_url = value; else body.content = value;
+          await api("/api/media", { method: "POST", body: JSON.stringify(body) });
+        }
+        ui.close(); await loadMedia(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: "Midia adicionada." });
+      } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
+    setTimeout(() => { const n = modal.querySelector("#mm-name"); if (n) n.focus(); }, 40);
+  }
+
+  // Modal de importacao em massa de URLs/textos (uma entrada por linha).
+  function openBulkModal() {
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    const typeOpts = ["url", "youtube", "embed", "text", "html"].map((t) => '<option value="' + t + '">' + TYPE_LABEL[t] + '</option>').join("");
+    const folderOpts = '<option value="">Sem pasta</option>' + state.folders.map((f) => '<option value="' + f.id + '">' + esc(f.name) + '</option>').join("");
+    modal.innerHTML =
+      '<div class="modal-head"><span class="modal-ico">' + ICONS.link + '</span><span class="modal-title">Importar em massa</span></div>' +
+      '<div class="modal-body">' +
+        '<p class="hint">Uma entrada por linha. Use <b>Nome | valor</b> para nomear, ou apenas o valor. Imagens e videos nao entram aqui (use Nova midia).</p>' +
+        '<div class="row" style="gap:10px"><div class="field grow"><label>Tipo</label><select id="bk-type">' + typeOpts + '</select></div><div class="field grow"><label>Pasta (opcional)</label><select id="bk-folder">' + folderOpts + '</select></div></div>' +
+        '<div class="field"><label>Itens</label><textarea id="bk-items" rows="8" placeholder="Promo 1 | https://youtube.com/watch?v=abc&#10;https://exemplo.com/pagina"></textarea></div>' +
+      '</div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Cancelar</button><button class="btn primary" data-create>' + ICONS.upload + ' Importar</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    modal.querySelector("[data-create]").addEventListener("click", async () => {
+      const type = modal.querySelector("#bk-type").value;
+      const folderId = modal.querySelector("#bk-folder").value;
+      const lines = modal.querySelector("#bk-items").value.split("\n").map((l) => l.trim()).filter(Boolean);
+      if (!lines.length) { toast({ kind: "warn", msg: "Adicione ao menos uma linha." }); return; }
+      const isContent = (type === "text" || type === "html");
+      const items = lines.map((line) => {
+        let name = line, value = line;
+        const sep = line.indexOf("|");
+        if (sep !== -1) { name = line.slice(0, sep).trim(); value = line.slice(sep + 1).trim(); }
+        const it = { name: name || value, type };
+        if (folderId) it.folder_id = Number(folderId);
+        if (isContent) it.content = value; else it.source_url = value;
+        return it;
+      });
+      try { const created = await bulkImportMedia(items); ui.close(); await loadMedia(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: (created ? created.length : items.length) + " midia(s) importada(s)." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
+  }
+
+  async function createFolder() {
+    const name = await promptDialog({ title: "Nova pasta", message: "Nome da pasta de midias:", icon: "folder", placeholder: "Ex.: Campanhas", confirmText: "Criar" });
+    if (!name) return;
+    try { await api("/api/folders", { method: "POST", body: JSON.stringify({ name }) }); state.folders = await loadFolders(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: "Pasta criada." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+
   function renderMediaInspector() {
     const m = mediaById(state.selectedMediaId);
-    if (!m) return '<div class="insp-head">' + ICONS.media + '<span>Midias</span></div><div class="insp-section"><p class="empty" style="padding:0">Selecione uma midia para editar nome e conteudo.</p></div>';
+    if (!m) return '<div class="insp-head">' + ICONS.media + '<span>Midias</span></div><div class="insp-section"><p class="empty" style="padding:0">Selecione uma midia para editar nome, conteudo, pasta e tags.</p></div>';
     let valField = "";
-    if (m.type === "text" || m.type === "html") valField = field("Conteudo", '<textarea id="mi-content">' + esc(m.content || "") + '</textarea>');
+    if (m.type === "text" || m.type === "html") valField = field("Conteudo", '<textarea id="mi-content" rows="4">' + esc(m.content || "") + '</textarea>');
     else if (m.type === "url" || m.type === "youtube" || m.type === "embed") valField = field("URL de origem", '<input id="mi-url" value="' + esc(m.source_url || "") + '"/>');
-    else valField = '<div class="field"><label>Arquivo</label><div class="code">' + esc(m.path || "-") + '</div></div>';
-    return '<div class="insp-head">' + ICONS[TYPE_ICON[m.type]] + '<span>' + esc(m.name) + '</span></div><div class="insp-section"><h5>' + TYPE_LABEL[m.type] + '</h5>' + field("Nome", '<input id="mi-name" value="' + esc(m.name) + '"/>') + valField + '<button class="btn primary block small" data-save-media>' + ICONS.check + ' Salvar</button></div>';
+    else valField = field("Arquivo atual", '<div class="code">' + esc(m.path || "-") + '</div>') + '<div class="field"><label>Substituir arquivo</label><input type="file" id="mi-file" accept="' + (m.type === "image" ? "image/*" : "video/*") + '"/></div>';
+    const folderOpts = '<option value="">Sem pasta</option>' + state.folders.map((f) => '<option value="' + f.id + '"' + (m.folder_id === f.id ? " selected" : "") + '>' + esc(f.name) + '</option>').join("");
+    return '<div class="insp-head">' + ICONS[TYPE_ICON[m.type]] + '<span>' + esc(m.name) + '</span></div><div class="insp-section"><h5>' + TYPE_LABEL[m.type] + '</h5>' +
+      field("Nome", '<input id="mi-name" value="' + esc(m.name) + '"/>') + valField +
+      field("Pasta", '<select id="mi-folder">' + folderOpts + '</select>') +
+      field("Tags (separadas por virgula)", '<input id="mi-tags" value="' + esc((m.tags || []).join(", ")) + '"/>') +
+      '<button class="btn primary block small" data-save-media>' + ICONS.check + ' Salvar</button></div>';
   }
   function bindMediaInspector() {
     const insp = $("inspector"); const m = mediaById(state.selectedMediaId); if (!m) return;
     const save = insp.querySelector("[data-save-media]"); if (!save) return;
     save.addEventListener("click", async () => {
-      const patch = { name: $("mi-name").value };
-      if ($("mi-content")) patch.content = $("mi-content").value;
-      if ($("mi-url")) patch.source_url = $("mi-url").value;
-      try { await api("/api/media/" + m.id, { method: "PATCH", body: JSON.stringify(patch) }); await loadMedia(); renderSidebar(); renderDoc(); renderInspector(); toast({ kind: "ok", msg: "Midia atualizada." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+      try {
+        const fileI = $("mi-file");
+        if (fileI && fileI.files[0]) { const fd = new FormData(); fd.append("file", fileI.files[0]); await api("/api/media/" + m.id + "/file", { method: "POST", body: fd }); }
+        const patch = { name: $("mi-name").value };
+        if ($("mi-content")) patch.content = $("mi-content").value;
+        if ($("mi-url")) patch.source_url = $("mi-url").value;
+        if ($("mi-folder")) patch.folder_id = $("mi-folder").value ? Number($("mi-folder").value) : null;
+        if ($("mi-tags")) patch.tags = $("mi-tags").value.split(",").map((s) => s.trim()).filter(Boolean);
+        await api("/api/media/" + m.id, { method: "PATCH", body: JSON.stringify(patch) });
+        await loadMedia(); renderSidebar(); renderDoc(); renderInspector(); toast({ kind: "ok", msg: "Midia atualizada." });
+      } catch (err) { toast({ kind: "err", msg: err.message }); }
     });
+  }
+
+  // ---------------------------- Configuracoes ---------------------- //
+  async function openSettings() {
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    modal.innerHTML =
+      '<div class="modal-head"><span class="modal-ico">' + ICONS.settings + '</span><span class="modal-title">Configuracoes</span></div>' +
+      '<div class="set-tabs"><button class="set-tab active" data-stab="account">' + ICONS.lock + ' Conta</button><button class="set-tab" data-stab="users">' + ICONS.user + ' Usuarios</button><button class="set-tab" data-stab="audit">' + ICONS.terminal + ' Auditoria</button></div>' +
+      '<div class="modal-body" id="set-body"></div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    const body = modal.querySelector("#set-body");
+    const tabs = modal.querySelectorAll(".set-tab");
+    const show = async (tab) => {
+      tabs.forEach((t) => t.classList.toggle("active", t.dataset.stab === tab));
+      if (tab === "account") {
+        body.innerHTML = '<div class="field"><label>Senha atual</label><input type="password" id="sp-cur"/></div><div class="field"><label>Nova senha (min. 6)</label><input type="password" id="sp-new"/></div><div class="field"><label>Confirmar nova senha</label><input type="password" id="sp-conf"/></div><button class="btn primary" id="sp-save">' + ICONS.check + ' Alterar senha</button>';
+        body.querySelector("#sp-save").addEventListener("click", async () => {
+          const cur = body.querySelector("#sp-cur").value, nw = body.querySelector("#sp-new").value, cf = body.querySelector("#sp-conf").value;
+          if (nw.length < 6) { toast({ kind: "warn", msg: "A nova senha deve ter ao menos 6 caracteres." }); return; }
+          if (nw !== cf) { toast({ kind: "warn", msg: "As senhas nao conferem." }); return; }
+          try { await changePassword(cur, nw); toast({ kind: "ok", msg: "Senha alterada." }); ui.close(); } catch (err) { toast({ kind: "err", msg: err.message }); }
+        });
+      } else if (tab === "users") {
+        body.innerHTML = '<p class="hint">Carregando...</p>';
+        try {
+          const users = await loadUsers();
+          const rows = users.map((u) => '<tr><td>' + esc(u.username) + '</td><td><span class="tag">' + esc(u.role) + '</span></td><td>' + (u.is_active ? "ativo" : "inativo") + '</td></tr>').join("");
+          body.innerHTML = '<table class="set-table"><thead><tr><th>Usuario</th><th>Papel</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+            '<label class="mm-label">Novo usuario</label>' +
+            '<div class="row" style="gap:10px"><div class="field grow"><label>Usuario</label><input id="nu-name"/></div><div class="field grow"><label>Senha</label><input type="password" id="nu-pass"/></div><div class="field"><label>Papel</label><select id="nu-role"><option value="viewer">viewer</option><option value="editor" selected>editor</option><option value="admin">admin</option></select></div></div>' +
+            '<button class="btn primary" id="nu-add">' + ICONS.plus + ' Criar usuario</button>';
+          body.querySelector("#nu-add").addEventListener("click", async () => {
+            const username = body.querySelector("#nu-name").value.trim(), password = body.querySelector("#nu-pass").value, role = body.querySelector("#nu-role").value;
+            if (username.length < 3 || password.length < 6) { toast({ kind: "warn", msg: "Usuario (min. 3) e senha (min. 6) obrigatorios." }); return; }
+            try { await createUser({ username, password, role }); toast({ kind: "ok", msg: "Usuario criado." }); show("users"); } catch (err) { toast({ kind: "err", msg: err.message }); }
+          });
+        } catch (err) { body.innerHTML = '<p class="empty">' + (/403|permiss|admin/i.test(err.message) ? "Apenas administradores podem gerenciar usuarios." : esc(err.message)) + '</p>'; }
+      } else {
+        body.innerHTML = '<p class="hint">Carregando...</p>';
+        try {
+          const data = await loadAudit(80);
+          const items = Array.isArray(data) ? data : (data.items || []);
+          if (!items.length) { body.innerHTML = '<p class="empty">Sem registros de auditoria.</p>'; return; }
+          body.innerHTML = '<table class="set-table"><thead><tr><th>Quando</th><th>Usuario</th><th>Acao</th></tr></thead><tbody>' + items.map((a) => '<tr><td class="mono">' + esc(String(a.created_at || a.timestamp || "").slice(0, 19).replace("T", " ")) + '</td><td>' + esc(a.username || a.actor || "-") + '</td><td>' + esc(a.action || a.event || "-") + '</td></tr>').join("") + '</tbody></table>';
+        } catch (err) { body.innerHTML = '<p class="empty">' + (/403|permiss|admin/i.test(err.message) ? "Apenas administradores podem ver a auditoria." : esc(err.message)) + '</p>'; }
+      }
+    };
+    tabs.forEach((t) => t.addEventListener("click", () => show(t.dataset.stab)));
+    show("account");
   }
 
   // ---------------------------- Playlists -------------------------- //

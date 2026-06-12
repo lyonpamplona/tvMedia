@@ -237,6 +237,72 @@ async def upload_media(
     return media
 
 
+@router.post("/{media_id}/file", response_model=schemas.MediaRead)
+async def replace_media_file(
+    media_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> models.Media:
+    """Substitui o arquivo de uma mídia de imagem/vídeo existente.
+
+    Mantém o registro (id, nome, pasta, tags) e troca apenas o arquivo,
+    apagando o antigo após gravar o novo. Valida extensão e content-type.
+    """
+    media = crud.get_media(db, media_id)
+    if media is None:
+        raise HTTPException(status_code=404, detail="Mídia não encontrada.")
+    if media.type not in (models.MediaType.image, models.MediaType.video):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Apenas mídias de imagem/vídeo possuem arquivo.",
+        )
+    suffix = Path(file.filename or "").suffix.lower()
+    content_type = (file.content_type or "").lower()
+    if media.type == models.MediaType.image:
+        if suffix not in _IMAGE_EXTS:
+            raise HTTPException(status_code=400, detail=f"Extensão não suportada: {suffix or '(desconhecida)'}")
+        if content_type and not content_type.startswith(_IMAGE_MIME_PREFIX):
+            raise HTTPException(status_code=400, detail="O conteúdo enviado não parece ser uma imagem.")
+    else:
+        if suffix not in _VIDEO_EXTS:
+            raise HTTPException(status_code=400, detail=f"Extensão não suportada: {suffix or '(desconhecida)'}")
+        if content_type and not content_type.startswith(_VIDEO_MIME_PREFIX):
+            raise HTTPException(status_code=400, detail="O conteúdo enviado não parece ser um vídeo.")
+
+    unique_name = f"{uuid.uuid4().hex}{suffix}"
+    destination = settings.media_dir / unique_name
+    max_bytes = settings.max_upload_bytes
+    written = 0
+    try:
+        with destination.open("wb") as buffer:
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"Arquivo excede o limite de {settings.max_upload_mb} MB.",
+                    )
+                buffer.write(chunk)
+    except HTTPException:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+
+    old_path = media.path
+    media.path = unique_name
+    db.add(media)
+    db.commit()
+    db.refresh(media)
+    if old_path:
+        (settings.media_dir / old_path).unlink(missing_ok=True)
+    await notify_all_screens(db, reason="media-file-replaced")
+    return media
+
+
 @router.patch("/{media_id}", response_model=schemas.MediaRead)
 async def update_media(
     media_id: int, data: schemas.MediaUpdate, db: Session = Depends(get_db)
