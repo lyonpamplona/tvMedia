@@ -1,12 +1,15 @@
 """Endpoints de gerenciamento de mídias.
 
-Suporta dois fluxos de criação:
+Fluxos de criação:
 
-* ``POST /api/media`` — cria mídia textual/HTML/URL (JSON).
-* ``POST /api/media/upload`` — envia arquivo (imagem/vídeo) via multipart.
+* ``POST /api/media`` — mídia textual/HTML/URL/embed/youtube (JSON).
+* ``POST /api/media/upload`` — arquivo (imagem/vídeo) via multipart, com
+  validação de extensão e de content-type e gravação em blocos.
+* ``POST /api/media/bulk`` — importação em massa de itens sem arquivo.
 
-Após qualquer alteração, todas as telas são notificadas para recarregar.
-Todas as rotas exigem autenticação (``require_auth`` no nível do roteador).
+Listagem com filtros opcionais (pasta, tag, busca) e paginação, mantendo
+compatibilidade: sem parâmetros, retorna a lista completa. Após alterações,
+todas as telas são notificadas. Todas as rotas exigem autenticação.
 """
 
 from __future__ import annotations
@@ -14,7 +17,16 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
@@ -31,31 +43,118 @@ router = APIRouter(
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
 _VIDEO_EXTS = {".mp4", ".webm", ".ogg", ".mov", ".mkv"}
 
-# Tamanho do bloco de leitura/gravação no upload (1 MB). Gravar em blocos evita
-# carregar arquivos grandes inteiros na memória — importante em hardware modesto
-# (ex.: Raspberry Pi 4).
+# Prefixos de content-type aceitos por tipo (defesa adicional além da extensão).
+_IMAGE_MIME_PREFIX = "image/"
+_VIDEO_MIME_PREFIX = "video/"
+
+# Tamanho do bloco de leitura/gravação no upload (1 MB), para uso de memória
+# praticamente constante mesmo com vídeos grandes (ex.: Raspberry Pi 4).
 _UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 
+def _validate_folder(db: Session, folder_id: int | None) -> None:
+    """Garante que a pasta informada existe (quando informada)."""
+    if folder_id is not None and crud.get_folder(db, folder_id) is None:
+        raise HTTPException(status_code=400, detail="Pasta inexistente.")
+
+
 @router.get("", response_model=list[schemas.MediaRead])
-def list_media(db: Session = Depends(get_db)) -> list[models.Media]:
-    """Lista todas as mídias cadastradas."""
-    return crud.list_media(db)
+def list_media(
+    folder_id: int | None = Query(None, description="Filtra por pasta (0 = sem pasta)."),
+    tag: str | None = Query(None, description="Filtra por tag."),
+    q: str | None = Query(None, description="Busca por nome."),
+    limit: int | None = Query(None, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> list[models.Media]:
+    """Lista mídias. Sem filtros/paginação, retorna todas (compatível)."""
+    if folder_id is None and tag is None and q is None and limit is None:
+        return crud.list_media(db)
+    rows, _ = crud.list_media_paginated(
+        db,
+        limit=limit or 50,
+        offset=offset,
+        folder_id=folder_id,
+        tag=tag,
+        search=q,
+    )
+    return rows
+
+
+@router.get("/page", response_model=schemas.Page[schemas.MediaRead])
+def list_media_page(
+    folder_id: int | None = Query(None),
+    tag: str | None = Query(None),
+    q: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> schemas.Page[schemas.MediaRead]:
+    """Versão paginada da listagem (total + itens da página)."""
+    rows, total = crud.list_media_paginated(
+        db, limit=limit, offset=offset, folder_id=folder_id, tag=tag, search=q
+    )
+    items = [schemas.MediaRead.model_validate(row) for row in rows]
+    return schemas.Page[schemas.MediaRead](
+        total=total, limit=limit, offset=offset, items=items
+    )
 
 
 @router.post("", response_model=schemas.MediaRead, status_code=status.HTTP_201_CREATED)
 async def create_media(
     data: schemas.MediaCreate, db: Session = Depends(get_db)
 ) -> models.Media:
-    """Cria uma mídia de texto, HTML ou URL (sem upload de arquivo)."""
+    """Cria uma mídia sem upload (texto, HTML, URL, embed, youtube)."""
     if data.type in (models.MediaType.image, models.MediaType.video):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Imagens e vídeos devem ser enviados via /api/media/upload.",
         )
-    media = crud.create_media(db, data)
+    _validate_folder(db, data.folder_id)
+    media = crud.create_media(
+        db,
+        name=data.name,
+        media_type=data.type,
+        source_url=data.source_url,
+        content=data.content,
+        tags=data.tags,
+        folder_id=data.folder_id,
+    )
     await notify_all_screens(db, reason="media-created")
     return media
+
+
+@router.post("/bulk", response_model=list[schemas.MediaRead], status_code=201)
+async def bulk_create_media(
+    data: schemas.BulkUrlRequest, db: Session = Depends(get_db)
+) -> list[models.Media]:
+    """Importa várias mídias sem arquivo de uma só vez.
+
+    Útil para cadastrar listas de URLs/embeds (ex.: vários vídeos do YouTube).
+    Itens de imagem/vídeo (que exigem arquivo) são rejeitados.
+    """
+    created: list[models.Media] = []
+    for item in data.items:
+        if item.type in (models.MediaType.image, models.MediaType.video):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Importação em massa não aceita imagens/vídeos.",
+            )
+        _validate_folder(db, item.folder_id)
+        created.append(
+            crud.create_media(
+                db,
+                name=item.name,
+                media_type=item.type,
+                source_url=item.source_url,
+                content=item.content,
+                tags=item.tags,
+                folder_id=item.folder_id,
+            )
+        )
+    if created:
+        await notify_all_screens(db, reason="media-bulk-created")
+    return created
 
 
 @router.post(
@@ -64,33 +163,46 @@ async def create_media(
 async def upload_media(
     name: str = Form(...),
     file: UploadFile = File(...),
+    folder_id: int | None = Form(None),
+    tags: str | None = Form(None),
     db: Session = Depends(get_db),
 ) -> models.Media:
-    """Recebe um arquivo (imagem/vídeo), salva em disco e registra a mídia.
+    """Recebe um arquivo (imagem/vídeo), valida, salva e registra a mídia.
 
-    O arquivo é gravado com um nome único (UUID + extensão original) dentro do
-    diretório de mídia configurado, e fica acessível publicamente em ``/media``.
+    Valida tanto a extensão quanto o content-type informado pelo cliente, e
+    grava em blocos para manter o uso de memória baixo.
 
     Raises:
-        HTTPException: extensão não suportada ou arquivo acima do limite.
+        HTTPException: extensão/tipo não suportados ou arquivo acima do limite.
     """
     suffix = Path(file.filename or "").suffix.lower()
+    content_type = (file.content_type or "").lower()
     if suffix in _IMAGE_EXTS:
         media_type = models.MediaType.image
+        if content_type and not content_type.startswith(_IMAGE_MIME_PREFIX):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="O conteúdo enviado não parece ser uma imagem.",
+            )
     elif suffix in _VIDEO_EXTS:
         media_type = models.MediaType.video
+        if content_type and not content_type.startswith(_VIDEO_MIME_PREFIX):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="O conteúdo enviado não parece ser um vídeo.",
+            )
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Extensão não suportada: {suffix or '(desconhecida)'}",
         )
 
+    _validate_folder(db, folder_id)
+
     unique_name = f"{uuid.uuid4().hex}{suffix}"
     destination = settings.media_dir / unique_name
     max_bytes = settings.max_upload_bytes
     written = 0
-    # Streaming em blocos: lê e grava aos poucos, mantendo o uso de memória
-    # praticamente constante mesmo para vídeos grandes.
     try:
         with destination.open("wb") as buffer:
             while True:
@@ -110,7 +222,17 @@ async def upload_media(
     finally:
         await file.close()
 
-    media = crud.create_uploaded_media(db, name, media_type, unique_name)
+    tag_list = (
+        [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+    )
+    media = crud.create_media(
+        db,
+        name=name,
+        media_type=media_type,
+        path=unique_name,
+        tags=tag_list,
+        folder_id=folder_id,
+    )
     await notify_all_screens(db, reason="media-uploaded")
     return media
 
@@ -123,6 +245,8 @@ async def update_media(
     media = crud.get_media(db, media_id)
     if media is None:
         raise HTTPException(status_code=404, detail="Mídia não encontrada.")
+    if "folder_id" in data.model_fields_set:
+        _validate_folder(db, data.folder_id)
     media = crud.update_media(db, media, data)
     await notify_all_screens(db, reason="media-updated")
     return media

@@ -40,7 +40,14 @@ async def notify_playlist_screens(
         reason: motivo da atualização.
     """
     slugs = db.scalars(
-        select(models.Screen.slug).where(models.Screen.playlist_id == playlist_id)
+        select(models.Screen.slug)
+        .join(models.Zone, models.Zone.screen_id == models.Screen.id)
+        .outerjoin(models.Schedule, models.Schedule.zone_id == models.Zone.id)
+        .where(
+            (models.Zone.default_playlist_id == playlist_id)
+            | (models.Schedule.playlist_id == playlist_id)
+        )
+        .distinct()
     )
     for slug in slugs:
         await manager.broadcast(slug, {"type": "reload", "reason": reason})

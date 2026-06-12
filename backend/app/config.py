@@ -1,10 +1,17 @@
 """Configurações da aplicação carregadas a partir de variáveis de ambiente.
 
-O objetivo deste módulo é centralizar todos os parâmetros configuráveis do
-sistema em um único objeto :class:`Settings`, evitando valores "mágicos"
-espalhados pelo código. As configurações são lidas de variáveis de ambiente
-(com suporte a um arquivo ``.env`` via ``python-dotenv``) e possuem valores
-padrão seguros para execução local/autohospedada.
+Centraliza todos os parâmetros configuráveis em um único objeto
+:class:`Settings`. Os valores são lidos de variáveis de ambiente (com suporte a
+um arquivo ``.env`` via ``python-dotenv``) e possuem padrões seguros para uso
+local/autohospedado.
+
+Novidades desta versão (endurecimento de segurança):
+
+* ``environment`` distingue desenvolvimento de produção.
+* :meth:`Settings.validate_security` recusa subir em produção com segredos
+  padrão (chave de assinatura e senha de admin).
+* CORS com credenciais só é habilitado quando as origens são explícitas.
+* Parâmetros de rate-limit de login e de backup automático.
 """
 
 from __future__ import annotations
@@ -15,11 +22,22 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Carrega o arquivo .env (se existir) para dentro de os.environ.
 load_dotenv()
 
-# Diretório base do backend (…/backend).
+# Diretório base do backend (.../backend).
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Valores padrão considerados inseguros para produção.
+DEFAULT_SECRET_KEY = "troque-esta-chave-em-producao"
+DEFAULT_ADMIN_PASSWORD = "admin"
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Lê uma variável de ambiente booleana de forma tolerante."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on", "sim")
 
 
 class Settings:
@@ -30,28 +48,34 @@ class Settings:
 
     Attributes:
         app_name: Nome exibido na documentação e nos logs.
-        debug: Habilita modo de depuração (recarga e logs mais verbosos).
-        database_url: URL de conexão do SQLAlchemy. Por padrão usa SQLite
-            em arquivo, ideal para ambientes autohospedados simples.
-        media_dir: Diretório onde os arquivos de mídia enviados são salvos.
+        environment: ``development`` ou ``production``.
+        debug: Habilita modo de depuração.
+        database_url: URL de conexão do SQLAlchemy.
+        media_dir: Diretório dos arquivos de mídia enviados.
         frontend_dir: Diretório com os arquivos estáticos do frontend.
-        max_upload_mb: Tamanho máximo permitido para upload de mídia (MB).
-        cors_origins: Lista de origens permitidas para requisições CORS.
-        admin_password: Senha única do painel administrativo.
+        max_upload_mb: Tamanho máximo de upload de mídia (MB).
+        cors_origins: Lista de origens permitidas para CORS.
+        admin_password: Senha inicial do usuário administrador semeado.
         secret_key: Chave usada para assinar os tokens de sessão (HMAC).
         token_ttl_hours: Validade do token de sessão, em horas.
         default_timezone: Fuso horário IANA padrão para agendamentos.
+        login_max_attempts: Tentativas de login antes do bloqueio temporário.
+        login_window_seconds: Janela de contagem das tentativas (segundos).
+        login_block_seconds: Duração do bloqueio após estourar o limite.
+        backup_enabled: Liga/desliga o backup automático do banco.
+        backup_dir: Pasta onde os backups são gravados.
+        backup_interval_hours: Intervalo entre backups automáticos.
+        backup_keep: Quantos backups manter (rotação).
     """
 
     def __init__(self) -> None:
         self.app_name: str = os.getenv("APP_NAME", "AdSignage")
-        self.debug: bool = os.getenv("DEBUG", "false").lower() == "true"
+        self.environment: str = os.getenv("ENVIRONMENT", "development").lower()
+        self.debug: bool = _env_bool("DEBUG", False)
 
-        # Persistência: por padrão SQLite em /data para facilitar volume Docker.
         default_db = f"sqlite:///{BASE_DIR / 'data' / 'adsignage.db'}"
         self.database_url: str = os.getenv("DATABASE_URL", default_db)
 
-        # Diretórios de mídia e frontend.
         self.media_dir: Path = Path(
             os.getenv("MEDIA_DIR", str(BASE_DIR / "data" / "media"))
         )
@@ -66,26 +90,97 @@ class Settings:
             if origin.strip()
         ]
 
-        # Autenticação do painel.
-        self.admin_password: str = os.getenv("ADMIN_PASSWORD", "admin")
-        self.secret_key: str = os.getenv(
-            "SECRET_KEY", "troque-esta-chave-em-producao"
-        )
+        self.admin_password: str = os.getenv("ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD)
+        self.secret_key: str = os.getenv("SECRET_KEY", DEFAULT_SECRET_KEY)
         self.token_ttl_hours: int = int(os.getenv("TOKEN_TTL_HOURS", "24"))
 
-        # Fuso horário padrão para resolução de agendamentos.
         self.default_timezone: str = os.getenv(
             "DEFAULT_TIMEZONE", "America/Sao_Paulo"
         )
+
+        # Rate-limit de login (proteção contra força bruta).
+        self.login_max_attempts: int = int(os.getenv("LOGIN_MAX_ATTEMPTS", "5"))
+        self.login_window_seconds: int = int(
+            os.getenv("LOGIN_WINDOW_SECONDS", "300")
+        )
+        self.login_block_seconds: int = int(
+            os.getenv("LOGIN_BLOCK_SECONDS", "300")
+        )
+
+        # Backup automático do banco SQLite.
+        self.backup_enabled: bool = _env_bool("BACKUP_ENABLED", True)
+        self.backup_dir: Path = Path(
+            os.getenv("BACKUP_DIR", str(BASE_DIR / "data" / "backups"))
+        )
+        self.backup_interval_hours: int = int(
+            os.getenv("BACKUP_INTERVAL_HOURS", "24")
+        )
+        self.backup_keep: int = int(os.getenv("BACKUP_KEEP", "7"))
 
         # Garante que os diretórios necessários existam.
         self.media_dir.mkdir(parents=True, exist_ok=True)
         (BASE_DIR / "data").mkdir(parents=True, exist_ok=True)
 
     @property
+    def is_production(self) -> bool:
+        """True quando a aplicação roda em ambiente de produção."""
+        return self.environment in ("production", "prod")
+
+    @property
     def max_upload_bytes(self) -> int:
         """Retorna o limite de upload convertido para bytes."""
         return self.max_upload_mb * 1024 * 1024
+
+    @property
+    def cors_allow_credentials(self) -> bool:
+        """Permite credenciais no CORS apenas com origens explícitas.
+
+        O navegador rejeita a combinação de ``Access-Control-Allow-Origin: *``
+        com credenciais; além disso, liberar tudo amplia a superfície a CSRF.
+        """
+        return bool(self.cors_origins) and "*" not in self.cors_origins
+
+    @property
+    def effective_cors_origins(self) -> list[str]:
+        """Origens efetivas para o middleware de CORS."""
+        return self.cors_origins or ["*"]
+
+    def security_warnings(self) -> list[str]:
+        """Lista problemas de segurança de configuração detectados."""
+        problems: list[str] = []
+        if self.secret_key == DEFAULT_SECRET_KEY:
+            problems.append(
+                "SECRET_KEY está com o valor padrão; defina uma chave forte."
+            )
+        if self.admin_password == DEFAULT_ADMIN_PASSWORD:
+            problems.append(
+                "ADMIN_PASSWORD está com o valor padrão 'admin'; troque-a."
+            )
+        if self.cors_allow_credentials is False and "*" in self.effective_cors_origins:
+            problems.append(
+                "CORS liberado para qualquer origem ('*'); restrinja em produção."
+            )
+        return problems
+
+    def validate_security(self) -> None:
+        """Recusa inicializar em produção com configuração insegura.
+
+        Em desenvolvimento, apenas registra avisos. Em produção, levanta
+        :class:`RuntimeError` se segredos padrão forem detectados.
+
+        Raises:
+            RuntimeError: em produção, quando há segredos padrão.
+        """
+        problems = self.security_warnings()
+        if not problems:
+            return
+        message = "Configuração insegura detectada:\n - " + "\n - ".join(problems)
+        if self.is_production:
+            raise RuntimeError(message)
+        # Em desenvolvimento, apenas avisa no log padrão.
+        import logging
+
+        logging.getLogger("adsignage.config").warning(message)
 
 
 @lru_cache

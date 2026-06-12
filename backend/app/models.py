@@ -1,26 +1,30 @@
-"""Modelos ORM (SQLAlchemy) do AdSignage — versão com zonas e agendamento.
+"""Modelos ORM (SQLAlchemy) do AdSignage.
 
 Domínio:
 
-* :class:`Media` — um recurso exibível (imagem, vídeo, texto, HTML ou URL).
-* :class:`Playlist` — uma sequência ordenada de itens.
-* :class:`PlaylistItem` — a associação entre uma playlist e uma mídia, com
-  ordem, tempo de exibição, modo de ajuste (``fit``) e transição.
-* :class:`Screen` — uma TV/tela física identificada por um ``slug`` único.
-* :class:`Zone` — uma região retangular dentro de uma tela (em %), com sua
-  própria playlist padrão. Permite múltiplas zonas simultâneas por tela.
-* :class:`Schedule` — regra de agendamento que troca a playlist de uma zona
-  conforme dia da semana e faixa de horário.
+* :class:`User` — operador do painel, com papel (role) e versionamento de token
+  para permitir revogação de sessões.
+* :class:`MediaFolder` — pasta para organizar mídias (hierarquia opcional).
+* :class:`Media` — recurso exibível (imagem, vídeo, texto, HTML, URL, embed),
+  com pasta e tags opcionais.
+* :class:`Playlist` / :class:`PlaylistItem` — sequência ordenada de itens.
+* :class:`Screen` — uma TV identificada por ``slug`` único.
+* :class:`Zone` — região retangular (em %) de uma tela, com playlist padrão.
+* :class:`Schedule` — regra de agendamento por dia/hora e, opcionalmente, por
+  faixa de datas (campanhas).
+* :class:`AuditLog` — trilha de auditoria das alterações administrativas.
+* :class:`PlayEvent` — registro de reprodução (proof-of-play).
 """
 
 from __future__ import annotations
 
 import enum
 import secrets
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -43,16 +47,16 @@ class MediaType(str, enum.Enum):
     text = "text"
     html = "html"
     url = "url"
-    youtube = "youtube"  # vídeo ou playlist do YouTube
-    embed = "embed"      # player incorporado (Spotify, YouTube Music, etc.)
+    youtube = "youtube"
+    embed = "embed"
 
 
 class FitMode(str, enum.Enum):
     """Modo de ajuste do conteúdo à área da zona (mapeia para object-fit)."""
 
-    contain = "contain"  # cabe inteiro, pode deixar bordas
-    cover = "cover"      # preenche a zona, pode cortar
-    fill = "fill"        # estica para preencher exatamente
+    contain = "contain"
+    cover = "cover"
+    fill = "fill"
 
 
 class Transition(str, enum.Enum):
@@ -63,23 +67,68 @@ class Transition(str, enum.Enum):
     slide = "slide"
 
 
-def _generate_slug() -> str:
-    """Gera um identificador curto e seguro para URLs de telas.
+class UserRole(str, enum.Enum):
+    """Papéis de acesso do painel.
 
-    Returns:
-        str: token aleatório seguro para uso em URLs (~11 caracteres).
+    * ``admin`` — acesso total, incluindo gestão de usuários.
+    * ``editor`` — gerencia mídia/playlists/telas, sem gestão de usuários.
+    * ``viewer`` — somente leitura.
     """
+
+    admin = "admin"
+    editor = "editor"
+    viewer = "viewer"
+
+
+def _generate_slug() -> str:
+    """Gera um identificador curto e seguro para URLs de telas."""
     return secrets.token_urlsafe(8)
 
 
-class Media(Base):
-    """Representa um conteúdo exibível na tela.
+class User(Base):
+    """Operador do painel administrativo.
 
-    Para tipos baseados em arquivo (``image``/``video``) o campo ``path``
-    guarda o caminho relativo dentro do diretório de mídia. Para ``text`` e
-    ``html`` o conteúdo textual fica em ``content``. Para ``url`` o destino
-    fica em ``source_url``.
+    ``token_version`` é incluído no token de sessão; incrementar o valor
+    invalida imediatamente todos os tokens emitidos (logout global/revogação).
     """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(
+        String(64), unique=True, index=True, nullable=False
+    )
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole), nullable=False, default=UserRole.editor
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_login: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class MediaFolder(Base):
+    """Pasta para organizar mídias, com hierarquia opcional."""
+
+    __tablename__ = "media_folders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("media_folders.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Media(Base):
+    """Representa um conteúdo exibível na tela."""
 
     __tablename__ = "media"
 
@@ -89,10 +138,16 @@ class Media(Base):
     path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     source_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Tags livres separadas por vírgula (ex.: "promo,verao").
+    tags: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    folder_id: Mapped[int | None] = mapped_column(
+        ForeignKey("media_folders.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
+    folder: Mapped["MediaFolder | None"] = relationship()
     items: Mapped[list["PlaylistItem"]] = relationship(
         back_populates="media", cascade="all, delete-orphan"
     )
@@ -131,19 +186,14 @@ class PlaylistItem(Base):
     media_id: Mapped[int] = mapped_column(
         ForeignKey("media.id", ondelete="CASCADE"), nullable=False
     )
-    # Posição (0-based) usada para ordenar os itens dentro da playlist.
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # Tempo de exibição em segundos (ignorado por vídeos que tocam até o fim).
     duration: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
-    # Como o conteúdo se ajusta à zona.
     fit: Mapped[FitMode] = mapped_column(
         Enum(FitMode), nullable=False, default=FitMode.contain
     )
-    # Efeito de entrada do item.
     transition: Mapped[Transition] = mapped_column(
         Enum(Transition), nullable=False, default=Transition.fade
     )
-    # Áudio: True silencia (necessário para autoplay confiável em muitos navegadores).
     muted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     playlist: Mapped["Playlist"] = relationship(back_populates="items")
@@ -151,13 +201,7 @@ class PlaylistItem(Base):
 
 
 class Screen(Base):
-    """Uma TV/tela física que reproduz uma ou mais zonas.
-
-    O campo ``slug`` é o identificador público usado na URL do player
-    (ex.: ``/player/?screen=<slug>``) e no canal WebSocket. ``last_seen``
-    registra o último "heartbeat". ``timezone`` define o fuso usado para
-    resolver agendamentos das zonas desta tela.
-    """
+    """Uma TV/tela física que reproduz uma ou mais zonas."""
 
     __tablename__ = "screens"
 
@@ -184,12 +228,7 @@ class Screen(Base):
 
 
 class Zone(Base):
-    """Região retangular de uma tela, com playlist e agendamentos próprios.
-
-    A posição e o tamanho são expressos em porcentagem (0–100) relativa à
-    tela, permitindo layouts como "conteúdo principal + faixa de notícias".
-    Uma tela simples tem uma única zona cobrindo 100%.
-    """
+    """Região retangular de uma tela, com playlist e agendamentos próprios."""
 
     __tablename__ = "zones"
 
@@ -198,13 +237,11 @@ class Zone(Base):
         ForeignKey("screens.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="Zona")
-    # Geometria em porcentagem da tela.
     x: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     y: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     width: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
     height: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
     z_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # Playlist exibida quando nenhum agendamento estiver ativo.
     default_playlist_id: Mapped[int | None] = mapped_column(
         ForeignKey("playlists.id", ondelete="SET NULL"), nullable=True
     )
@@ -221,10 +258,11 @@ class Zone(Base):
 class Schedule(Base):
     """Regra de agendamento de playlist para uma zona.
 
-    A regra vale nos dias da semana indicados em ``days_of_week`` (CSV de
-    inteiros, 0=segunda … 6=domingo) e na faixa de horário entre
-    ``start_minute`` e ``end_minute`` (minutos desde a meia-noite, no fuso da
-    tela). Em caso de sobreposição, vence a regra de maior ``priority``.
+    Vale nos dias da semana em ``days_of_week`` (CSV de inteiros, 0=segunda …
+    6=domingo) e na faixa de horário ``start_minute``–``end_minute`` (minutos
+    desde a meia-noite). Opcionalmente limita-se a uma faixa de datas
+    (``start_date``/``end_date``) para campanhas. Em sobreposição, vence a
+    maior ``priority``.
     """
 
     __tablename__ = "schedules"
@@ -236,13 +274,48 @@ class Schedule(Base):
     playlist_id: Mapped[int] = mapped_column(
         ForeignKey("playlists.id", ondelete="CASCADE"), nullable=False
     )
-    # Ex.: "0,1,2,3,4" = dias úteis.
     days_of_week: Mapped[str] = mapped_column(
         String(32), nullable=False, default="0,1,2,3,4,5,6"
     )
     start_minute: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     end_minute: Mapped[int] = mapped_column(Integer, nullable=False, default=1440)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Faixa de datas opcional (campanhas). Nulo = sem limite.
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     zone: Mapped["Zone"] = relationship(back_populates="schedules")
     playlist: Mapped["Playlist"] = relationship()
+
+
+class AuditLog(Base):
+    """Trilha de auditoria de ações administrativas."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    actor: Mapped[str] = mapped_column(String(64), nullable=False, default="sistema")
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+class PlayEvent(Base):
+    """Registro de reprodução de uma mídia em uma tela (proof-of-play)."""
+
+    __tablename__ = "play_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    screen_slug: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    zone_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    media_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    media_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    media_type: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    played_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
