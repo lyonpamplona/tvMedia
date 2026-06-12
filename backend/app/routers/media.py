@@ -31,6 +31,11 @@ router = APIRouter(
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
 _VIDEO_EXTS = {".mp4", ".webm", ".ogg", ".mov", ".mkv"}
 
+# Tamanho do bloco de leitura/gravação no upload (1 MB). Gravar em blocos evita
+# carregar arquivos grandes inteiros na memória — importante em hardware modesto
+# (ex.: Raspberry Pi 4).
+_UPLOAD_CHUNK_SIZE = 1024 * 1024
+
 
 @router.get("", response_model=list[schemas.MediaRead])
 def list_media(db: Session = Depends(get_db)) -> list[models.Media]:
@@ -80,16 +85,30 @@ async def upload_media(
             detail=f"Extensão não suportada: {suffix or '(desconhecida)'}",
         )
 
-    payload = await file.read()
-    if len(payload) > settings.max_upload_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Arquivo excede o limite de {settings.max_upload_mb} MB.",
-        )
-
     unique_name = f"{uuid.uuid4().hex}{suffix}"
     destination = settings.media_dir / unique_name
-    destination.write_bytes(payload)
+    max_bytes = settings.max_upload_bytes
+    written = 0
+    # Streaming em blocos: lê e grava aos poucos, mantendo o uso de memória
+    # praticamente constante mesmo para vídeos grandes.
+    try:
+        with destination.open("wb") as buffer:
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"Arquivo excede o limite de {settings.max_upload_mb} MB.",
+                    )
+                buffer.write(chunk)
+    except HTTPException:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
 
     media = crud.create_uploaded_media(db, name, media_type, unique_name)
     await notify_all_screens(db, reason="media-uploaded")
