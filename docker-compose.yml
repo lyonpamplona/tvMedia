@@ -17,6 +17,10 @@ services:
     # (ex.: Raspberry Pi 4 com 4 GB) de ter toda a RAM consumida pela aplicação.
     mem_limit: 512m
     mem_reservation: 256m
+    # Variaveis sensiveis (senha, secret) e ajustaveis vem do .env na raiz.
+    # As definidas em 'environment' abaixo fixam caminhos internos do container.
+    env_file:
+      - .env
     environment:
       APP_NAME: AdSignage
       DEBUG: "false"
