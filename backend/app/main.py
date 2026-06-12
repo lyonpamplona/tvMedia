@@ -1,18 +1,17 @@
-"""Ponto de entrada da aplicação FastAPI do AdSignage (v2).
+"""Ponto de entrada da aplicação FastAPI (AdSignage).
 
-Responsabilidades:
+Responsabilidades deste módulo:
 
-* Inicializar o banco de dados no startup (via ``lifespan``).
-* Configurar CORS.
-* Registrar os roteadores da API (auth, media, playlists, screens, zones,
-  schedules, display).
-* Servir os arquivos de mídia enviados e o frontend estático (painel + player).
+* Criar a instância ``app`` do FastAPI e configurar CORS.
+* Inicializar o banco de dados no startup.
+* Registrar os roteadores REST e o WebSocket de exibição.
+* Servir arquivos estáticos: mídia enviada (``/media``), painel administrativo
+  (``/admin``) e player (``/player``).
 """
 
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,14 +21,15 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .config import settings
 from .database import init_db
-from .routers import auth, display, media, playlists, schedules, screens, zones
+from .routers import display, media, playlists, screens
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Executa tarefas de inicialização e finalização da aplicação.
+async def lifespan(app: FastAPI):
+    """Gerencia o ciclo de vida da aplicação.
 
-    No startup, cria as tabelas do banco caso ainda não existam.
+    No startup, garante que as tabelas existam. É o local ideal para futuras
+    rotinas de inicialização (ex.: migrações, seeds).
     """
     init_db()
     yield
@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title=settings.app_name,
     version=__version__,
-    description="Sistema autohospedado de sinalização digital para TVs.",
+    summary="Sistema autohospedado de sinalização digital (digital signage).",
     lifespan=lifespan,
 )
 
@@ -50,35 +50,46 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Roteadores da API.
-app.include_router(auth.router)
+# Roteadores da API REST e o WebSocket.
 app.include_router(media.router)
 app.include_router(playlists.router)
 app.include_router(screens.router)
-app.include_router(zones.router)
-app.include_router(schedules.router)
 app.include_router(display.router)
 
 
-@app.get("/api/health", tags=["health"])
+@app.get("/api/health", tags=["sistema"])
 def health() -> dict[str, str]:
-    """Healthcheck simples usado pelo Docker e por monitoramento."""
-    return {"status": "ok", "version": __version__}
+    """Endpoint simples de verificação de saúde (healthcheck)."""
+    return {"status": "ok", "app": settings.app_name, "version": __version__}
 
 
-# Arquivos de mídia enviados (público, somente leitura).
-app.mount("/media", StaticFiles(directory=str(settings.media_dir)), name="media")
+# --------------------------------------------------------------------------- #
+# Arquivos estáticos
+# --------------------------------------------------------------------------- #
+# Mídias enviadas pelos usuários.
+app.mount(
+    "/media",
+    StaticFiles(directory=str(settings.media_dir)),
+    name="media",
+)
 
-# Frontend estático: painel administrativo e player.
-admin_dir = settings.frontend_dir / "admin"
-player_dir = settings.frontend_dir / "player"
-if admin_dir.is_dir():
-    app.mount("/admin", StaticFiles(directory=str(admin_dir), html=True), name="admin")
-if player_dir.is_dir():
-    app.mount("/player", StaticFiles(directory=str(player_dir), html=True), name="player")
+# Frontend: painel administrativo e player. Servidos apenas se o diretório
+# existir (em desenvolvimento o frontend pode ser servido separadamente).
+if (settings.frontend_dir / "admin").is_dir():
+    app.mount(
+        "/admin",
+        StaticFiles(directory=str(settings.frontend_dir / "admin"), html=True),
+        name="admin",
+    )
+if (settings.frontend_dir / "player").is_dir():
+    app.mount(
+        "/player",
+        StaticFiles(directory=str(settings.frontend_dir / "player"), html=True),
+        name="player",
+    )
 
 
 @app.get("/", include_in_schema=False)
-def root() -> RedirectResponse:
+def index() -> RedirectResponse:
     """Redireciona a raiz para o painel administrativo."""
     return RedirectResponse(url="/admin/")

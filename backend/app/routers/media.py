@@ -5,8 +5,7 @@ Suporta dois fluxos de criação:
 * ``POST /api/media`` — cria mídia textual/HTML/URL (JSON).
 * ``POST /api/media/upload`` — envia arquivo (imagem/vídeo) via multipart.
 
-Após qualquer alteração, todas as telas são notificadas para recarregar.
-Todas as rotas exigem autenticação (``require_auth`` no nível do roteador).
+Após qualquer alteração, as telas afetadas são notificadas para recarregar.
 """
 
 from __future__ import annotations
@@ -18,23 +17,15 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
-from ..auth import require_auth
 from ..config import settings
 from ..database import get_db
 from ..realtime import notify_all_screens
 
-router = APIRouter(
-    prefix="/api/media", tags=["media"], dependencies=[Depends(require_auth)]
-)
+router = APIRouter(prefix="/api/media", tags=["media"])
 
 # Extensões aceitas por tipo de upload.
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
 _VIDEO_EXTS = {".mp4", ".webm", ".ogg", ".mov", ".mkv"}
-
-# Tamanho do bloco de leitura/gravação no upload (1 MB). Gravar em blocos evita
-# carregar arquivos grandes inteiros na memória — importante em hardware modesto
-# (ex.: Raspberry Pi 4).
-_UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 @router.get("", response_model=list[schemas.MediaRead])
@@ -71,6 +62,11 @@ async def upload_media(
     O arquivo é gravado com um nome único (UUID + extensão original) dentro do
     diretório de mídia configurado, e fica acessível publicamente em ``/media``.
 
+    Args:
+        name: nome amigável da mídia.
+        file: arquivo enviado via multipart.
+        db: sessão de banco injetada.
+
     Raises:
         HTTPException: extensão não suportada ou arquivo acima do limite.
     """
@@ -85,30 +81,16 @@ async def upload_media(
             detail=f"Extensão não suportada: {suffix or '(desconhecida)'}",
         )
 
+    payload = await file.read()
+    if len(payload) > settings.max_upload_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Arquivo excede o limite de {settings.max_upload_mb} MB.",
+        )
+
     unique_name = f"{uuid.uuid4().hex}{suffix}"
     destination = settings.media_dir / unique_name
-    max_bytes = settings.max_upload_bytes
-    written = 0
-    # Streaming em blocos: lê e grava aos poucos, mantendo o uso de memória
-    # praticamente constante mesmo para vídeos grandes.
-    try:
-        with destination.open("wb") as buffer:
-            while True:
-                chunk = await file.read(_UPLOAD_CHUNK_SIZE)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > max_bytes:
-                    raise HTTPException(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail=f"Arquivo excede o limite de {settings.max_upload_mb} MB.",
-                    )
-                buffer.write(chunk)
-    except HTTPException:
-        destination.unlink(missing_ok=True)
-        raise
-    finally:
-        await file.close()
+    destination.write_bytes(payload)
 
     media = crud.create_uploaded_media(db, name, media_type, unique_name)
     await notify_all_screens(db, reason="media-uploaded")
@@ -128,15 +110,14 @@ async def update_media(
     return media
 
 
-@router.delete(
-    "/{media_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None
-)
+@router.delete("/{media_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_media(media_id: int, db: Session = Depends(get_db)) -> None:
     """Remove uma mídia e o arquivo associado (se houver)."""
     media = crud.get_media(db, media_id)
     if media is None:
         raise HTTPException(status_code=404, detail="Mídia não encontrada.")
 
+    # Remove o arquivo físico, se a mídia for baseada em arquivo.
     if media.path:
         file_path = settings.media_dir / media.path
         file_path.unlink(missing_ok=True)

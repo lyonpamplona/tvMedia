@@ -1,150 +1,148 @@
-"""Endpoints públicos consumidos pelo player na TV.
+"""Endpoints consumidos diretamente pelo player nas TVs.
 
 Inclui:
 
-* ``GET /api/display/{slug}`` — monta o payload de exibição resolvendo, para
-  cada zona, a playlist ativa no momento (considerando agendamentos e fuso da
-  tela). Também registra um "heartbeat" (``last_seen``).
-* ``WS /ws/display/{slug}`` — canal de tempo real; o servidor envia
-  ``{"type": "reload"}`` quando o conteúdo da tela muda.
-
-Estes endpoints são públicos (sem autenticação): a TV só conhece o ``slug``.
+* ``GET /api/display/{slug}`` — retorna o conteúdo resolvido da tela (a
+  playlist vinculada, com URLs absolutas e durações), pronto para reprodução.
+* ``WS  /ws/display/{slug}`` — canal WebSocket pelo qual o servidor avisa o
+  player para recarregar quando algo muda.
 """
 
 from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
 from ..database import SessionLocal, get_db
-from ..embeds import build_embed_url
 from ..websocket_manager import manager
 
 router = APIRouter(tags=["display"])
 
 
-def _media_url(request: Request, media: models.Media) -> str | None:
-    """Resolve a URL pública de uma mídia conforme o tipo.
+def _media_to_display_item(
+    item: models.PlaylistItem, base_url: str
+) -> schemas.DisplayItem:
+    """Converte um item de playlist no formato consumido pelo player.
+
+    Resolve a URL pública de mídias baseadas em arquivo e repassa conteúdo
+    textual/HTML/URL conforme o tipo.
 
     Args:
-        request: requisição atual (para montar URL absoluta de arquivos).
-        media: mídia a resolver.
+        item: item de playlist com mídia carregada.
+        base_url: URL base do servidor (ex.: ``http://host:8000``).
 
     Returns:
-        str | None: URL absoluta do arquivo/origem, ou None para texto/HTML.
+        schemas.DisplayItem: item pronto para exibição.
     """
-    if media.type in (models.MediaType.image, models.MediaType.video) and media.path:
-        return str(request.base_url) + f"media/{media.path}"
-    if media.type == models.MediaType.url:
-        return media.source_url
-    return None
+    media = item.media
+    url: str | None = None
+    content: str | None = None
 
+    if media.type in (models.MediaType.image, models.MediaType.video):
+        url = f"{base_url}/media/{media.path}"
+    elif media.type == models.MediaType.url:
+        url = media.source_url
+    else:  # text / html
+        content = media.content
 
-def _now_in_timezone(tz_name: str) -> datetime:
-    """Retorna o instante atual no fuso informado (com fallback para UTC)."""
-    try:
-        tz = ZoneInfo(tz_name)
-    except (ZoneInfoNotFoundError, ValueError):
-        tz = timezone.utc
-    return datetime.now(tz)
-
-
-def _build_zone_payload(
-    request: Request, db: Session, zone: models.Zone, now: datetime
-) -> schemas.DisplayZone:
-    """Monta o payload de uma zona resolvendo a playlist ativa no momento."""
-    playlist_id = crud.resolve_active_playlist_id(zone, now)
-    playlist = crud.get_playlist(db, playlist_id) if playlist_id else None
-
-    items: list[schemas.DisplayItem] = []
-    if playlist is not None:
-        for item in sorted(playlist.items, key=lambda i: i.position):
-            if item.media.type in (models.MediaType.youtube, models.MediaType.embed):
-                media_url = build_embed_url(item.media, muted=item.muted)
-            else:
-                media_url = _media_url(request, item.media)
-            items.append(
-                schemas.DisplayItem(
-                    type=item.media.type,
-                    duration=item.duration,
-                    name=item.media.name,
-                    fit=item.fit,
-                    transition=item.transition,
-                    muted=item.muted,
-                    url=media_url,
-                    content=item.media.content,
-                )
-            )
-
-    return schemas.DisplayZone(
-        id=zone.id,
-        name=zone.name,
-        x=zone.x,
-        y=zone.y,
-        width=zone.width,
-        height=zone.height,
-        z_index=zone.z_index,
-        playlist_name=playlist.name if playlist else None,
-        items=items,
+    return schemas.DisplayItem(
+        type=media.type,
+        duration=item.duration,
+        name=media.name,
+        url=url,
+        content=content,
     )
 
 
-def _compute_revision(payload: schemas.DisplayPayload) -> str:
-    """Calcula um hash curto e estável do conteúdo (detecta mudanças).
+def _compute_revision(screen: models.Screen) -> str:
+    """Calcula um hash curto que muda sempre que a playlist da tela muda.
 
-    O player compara a ``revision`` entre buscas para decidir se reinicia a
-    reprodução. Excluindo o próprio campo ``revision`` do cálculo.
+    O player usa esse valor para evitar reinicializar a reprodução quando o
+    conteúdo não mudou de fato.
+
+    Args:
+        screen: tela com playlist (e itens) carregada.
+
+    Returns:
+        str: hash hexadecimal curto (12 caracteres).
     """
-    snapshot = payload.model_dump(exclude={"revision"})
-    raw = repr(snapshot).encode()
-    return hashlib.sha256(raw).hexdigest()[:12]
+    parts: list[str] = [str(screen.id)]
+    if screen.playlist is not None:
+        parts.append(screen.playlist.updated_at.isoformat())
+        for item in screen.playlist.items:
+            parts.append(f"{item.id}:{item.position}:{item.duration}")
+    digest = hashlib.sha256("|".join(parts).encode()).hexdigest()
+    return digest[:12]
 
 
 @router.get("/api/display/{slug}", response_model=schemas.DisplayPayload)
 def get_display(
     slug: str, request: Request, db: Session = Depends(get_db)
 ) -> schemas.DisplayPayload:
-    """Retorna o conteúdo resolvido de uma tela para o player.
+    """Retorna o conteúdo completo que o player deve reproduzir.
 
-    Resolve cada zona para a playlist ativa no momento (agendamento + fuso),
-    registra o heartbeat da tela e calcula a ``revision`` do conteúdo.
+    Também atualiza ``last_seen`` da tela, funcionando como heartbeat.
+
+    Args:
+        slug: identificador público da tela.
+        request: requisição (usada para derivar a URL base).
+        db: sessão de banco injetada.
 
     Raises:
-        HTTPException: 404 quando o ``slug`` não corresponde a uma tela.
+        HTTPException: se a tela não existir.
     """
     screen = crud.get_screen_by_slug(db, slug)
     if screen is None:
         raise HTTPException(status_code=404, detail="Tela não encontrada.")
 
-    # Heartbeat: marca a tela como online.
+    # Heartbeat: registra que a tela está online.
     screen.last_seen = datetime.now(timezone.utc)
     db.commit()
 
-    now = _now_in_timezone(screen.timezone)
-    zones = [
-        _build_zone_payload(request, db, zone, now)
-        for zone in sorted(screen.zones, key=lambda z: z.z_index)
-    ]
+    base_url = str(request.base_url).rstrip("/")
+    items: list[schemas.DisplayItem] = []
+    playlist_name: str | None = None
 
-    payload = schemas.DisplayPayload(screen=screen.slug, revision="", zones=zones)
-    payload.revision = _compute_revision(payload)
-    return payload
+    if screen.playlist is not None:
+        playlist_name = screen.playlist.name
+        ordered = sorted(screen.playlist.items, key=lambda it: it.position)
+        items = [_media_to_display_item(it, base_url) for it in ordered]
+
+    return schemas.DisplayPayload(
+        screen=screen.slug,
+        playlist_name=playlist_name,
+        revision=_compute_revision(screen),
+        items=items,
+    )
 
 
 @router.websocket("/ws/display/{slug}")
 async def display_socket(websocket: WebSocket, slug: str) -> None:
-    """Canal WebSocket que avisa o player quando a tela deve recarregar.
+    """Canal WebSocket que mantém o player sincronizado em tempo real.
 
-    Valida o ``slug`` antes de aceitar, registra a conexão no gerenciador e
-    mantém um loop de ping/pong. Mensagens de difusão (``reload``) são enviadas
-    pelos helpers em :mod:`app.realtime` quando o conteúdo muda.
+    Fluxo:
+        1. Valida que a tela existe (encerra com código 4404 caso contrário).
+        2. Registra a conexão no :class:`ConnectionManager`.
+        3. Permanece ouvindo; mensagens recebidas do player (ex.: "ping") são
+           respondidas com "pong" para manter a conexão viva.
+        4. Ao desconectar, remove a conexão do gerenciador.
+
+    Args:
+        websocket: conexão WebSocket de entrada.
+        slug: identificador público da tela.
     """
-    # Valida o slug usando uma sessão própria (fora do ciclo de dependências).
+    # Valida a existência da tela usando uma sessão curta e independente.
     with SessionLocal() as db:
         screen = crud.get_screen_by_slug(db, slug)
         if screen is None:
@@ -155,7 +153,6 @@ async def display_socket(websocket: WebSocket, slug: str) -> None:
     try:
         while True:
             message = await websocket.receive_text()
-            # Responde ao keep-alive do cliente.
             if message == "ping":
                 await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect:

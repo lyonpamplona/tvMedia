@@ -37,10 +37,6 @@ class Settings:
         frontend_dir: Diretório com os arquivos estáticos do frontend.
         max_upload_mb: Tamanho máximo permitido para upload de mídia (MB).
         cors_origins: Lista de origens permitidas para requisições CORS.
-        admin_password: Senha única do painel administrativo.
-        secret_key: Chave usada para assinar os tokens de sessão (HMAC).
-        token_ttl_hours: Validade do token de sessão, em horas.
-        default_timezone: Fuso horário IANA padrão para agendamentos.
     """
 
     def __init__(self) -> None:
@@ -65,18 +61,6 @@ class Settings:
             for origin in os.getenv("CORS_ORIGINS", "*").split(",")
             if origin.strip()
         ]
-
-        # Autenticação do painel.
-        self.admin_password: str = os.getenv("ADMIN_PASSWORD", "admin")
-        self.secret_key: str = os.getenv(
-            "SECRET_KEY", "troque-esta-chave-em-producao"
-        )
-        self.token_ttl_hours: int = int(os.getenv("TOKEN_TTL_HOURS", "24"))
-
-        # Fuso horário padrão para resolução de agendamentos.
-        self.default_timezone: str = os.getenv(
-            "DEFAULT_TIMEZONE", "America/Sao_Paulo"
-        )
 
         # Garante que os diretórios necessários existam.
         self.media_dir.mkdir(parents=True, exist_ok=True)
