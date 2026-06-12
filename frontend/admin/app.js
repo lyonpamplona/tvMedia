@@ -115,6 +115,47 @@
   async function loadPlaylists() { state.playlists = await api("/api/playlists"); }
   async function loadScreens() { state.screens = await api("/api/screens"); }
 
+  // Endpoints novos (analytics, folders, users, auditoria, importacao em massa).
+  async function loadHealth() { return api("/api/analytics/screens/health"); }
+  async function loadProofOfPlay(days, screenSlug) {
+    const qs = new URLSearchParams();
+    if (days) qs.set("days", String(days));
+    if (screenSlug) qs.set("screen", screenSlug);
+    return api("/api/analytics/proof-of-play?" + qs.toString());
+  }
+  async function previewScreen(id) { return api("/api/screens/" + id + "/preview"); }
+  async function bulkImportMedia(items) { return api("/api/media/bulk", { method: "POST", body: JSON.stringify({ items }) }); }
+  async function loadFolders() { return api("/api/folders"); }
+  async function loadUsers() { return api("/api/users"); }
+  async function createUser(data) { return api("/api/users", { method: "POST", body: JSON.stringify(data) }); }
+  async function loadAudit(limit) { return api("/api/audit?limit=" + (limit || 100)); }
+  async function changePassword(currentPassword, newPassword) {
+    const j = await api("/api/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) });
+    if (j && j.token) { token = j.token; localStorage.setItem(TOKEN_KEY, token); }
+    return j;
+  }
+
+  /** Mostra um resumo da saude das telas (online/offline + players). */
+  async function reportHealth() {
+    try {
+      const rows = await loadHealth();
+      if (!rows || !rows.length) { toast({ kind: "info", msg: "Nenhuma tela cadastrada." }); return; }
+      const online = rows.filter((r) => r.online).length;
+      const summary = rows.map((r) => (r.online ? "on" : "off") + " " + r.name + " (" + r.connected_players + ")").join(" \u00b7 ");
+      toast({ kind: "info", title: "Telas: " + online + "/" + rows.length + " online", msg: summary, timeout: 8000 });
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+
+  /** Mostra o proof-of-play agregado dos ultimos 7 dias. */
+  async function reportProofOfPlay() {
+    try {
+      const rows = await loadProofOfPlay(7);
+      if (!rows || !rows.length) { toast({ kind: "info", msg: "Sem dados de exibicao nos ultimos 7 dias." }); return; }
+      const summary = rows.slice(0, 10).map((r) => r.media_name + ": " + r.plays + "x (" + Math.round(r.total_seconds / 60) + " min)").join(" \u00b7 ");
+      toast({ kind: "info", title: "Proof-of-play (7 dias)", msg: summary, timeout: 9000 });
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+
   /** Carrega todos os dados e renderiza o painel. */
   async function loadAll() {
     try {
@@ -675,6 +716,8 @@
     { icon: "eye", label: "Pre-visualizar player da tela atual", run: () => { const s = screen(); if (s) window.open(playerUrl(s.slug), "_blank"); } },
     { icon: "refresh", label: "Recarregar dados", run: () => loadAll() },
     { icon: "sun", label: "Alternar tema claro/escuro", run: () => toggleTheme() },
+    { icon: "wifi", label: "Saude das telas (online/offline)", run: () => reportHealth() },
+    { icon: "timeline", label: "Relatorio de exibicao (proof-of-play 7d)", run: () => reportProofOfPlay() },
     { icon: "info", label: "Abrir guia de uso (tutorial)", run: () => openOnboard() },
     { icon: "power", label: "Sair (logout)", run: () => logout() },
   ];
@@ -732,7 +775,12 @@
 
   // ----------------------------- Auth ------------------------------ //
   function showApp() { $("login").classList.add("hidden"); $("ide").classList.remove("hidden"); loadAll(); maybeOnboard(); }
-  function logout() { token = null; localStorage.removeItem(TOKEN_KEY); $("ide").classList.add("hidden"); $("login").classList.remove("hidden"); }
+  function logout() {
+    try {
+      if (token) fetch("/api/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + token }, keepalive: true }).catch(() => {});
+    } catch (e) { /* best-effort */ }
+    token = null; state.user = null; localStorage.removeItem(TOKEN_KEY); $("ide").classList.add("hidden"); $("login").classList.remove("hidden");
+  }
 
   // --------------------------- Inicializacao ----------------------- //
   function init() {
@@ -748,7 +796,7 @@
       try {
         const resp = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
         if (!resp.ok) throw new Error("Senha incorreta.");
-        const json = await resp.json(); token = json.token; localStorage.setItem(TOKEN_KEY, token); showApp();
+        const json = await resp.json(); token = json.token; state.user = { username: json.username, role: json.role }; localStorage.setItem(TOKEN_KEY, token); showApp();
       } catch (err) { errEl.textContent = err.message; }
     });
     $("logout").addEventListener("click", logout);
