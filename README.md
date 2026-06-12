@@ -1,4 +1,4 @@
-# 📺 tvMedia — Sinalização digital autohospedada
+# 📺 AdSignage — Sinalização digital autohospedada
 
 Sistema completo para exibir propagandas em TVs de lojas e comércios. Edite o
 conteúdo no painel e ele aparece **na hora** nas telas, via WebSocket.
