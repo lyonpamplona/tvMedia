@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AdSignage — Painel</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Tela de login (exibida quando não há token válido). -->
+  <div id="login" class="login-overlay">
+    <form id="login-form" class="login-card">
+      <h1>📺 AdSignage</h1>
+      <p class="muted">Entre com a senha do painel.</p>
+      <input type="password" id="login-password" placeholder="Senha" autocomplete="current-password" required />
+      <button type="submit" class="btn primary">Entrar</button>
+      <p id="login-error" class="error"></p>
+    </form>
+  </div>
+
+  <!-- Aplicação (exibida após login). -->
+  <div id="app" class="app hidden">
+    <header class="topbar">
+      <div class="brand">📺 AdSignage</div>
+      <nav class="tabs">
+        <button class="tab active" data-tab="screens">Telas</button>
+        <button class="tab" data-tab="playlists">Playlists</button>
+        <button class="tab" data-tab="media">Mídias</button>
+      </nav>
+      <button id="logout" class="btn ghost">Sair</button>
+    </header>
+
+    <main class="content">
+      <!-- ============================ TELAS ============================ -->
+      <section id="tab-screens" class="tab-panel active">
+        <div class="panel-head">
+          <h2>Telas</h2>
+          <form id="screen-form" class="inline-form">
+            <input type="text" id="screen-name" placeholder="Nome da tela" required />
+            <input type="text" id="screen-tz" placeholder="Fuso (ex.: America/Sao_Paulo)" value="America/Sao_Paulo" />
+            <button class="btn primary" type="submit">Adicionar</button>
+          </form>
+        </div>
+        <div id="screens-list" class="cards"></div>
+      </section>
+
+      <!-- ========================== PLAYLISTS ========================== -->
+      <section id="tab-playlists" class="tab-panel">
+        <div class="panel-head">
+          <h2>Playlists</h2>
+          <form id="playlist-form" class="inline-form">
+            <input type="text" id="playlist-name" placeholder="Nome da playlist" required />
+            <button class="btn primary" type="submit">Criar</button>
+          </form>
+        </div>
+        <div class="split">
+          <div id="playlists-list" class="list"></div>
+          <div id="playlist-detail" class="detail">
+            <p class="muted">Selecione uma playlist para editar seus itens.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ MÍDIAS ========================== -->
+      <section id="tab-media" class="tab-panel">
+        <div class="panel-head">
+          <h2>Mídias</h2>
+        </div>
+        <div class="media-forms">
+          <form id="upload-form" class="card-form">
+            <h3>Enviar imagem/vídeo</h3>
+            <input type="text" id="upload-name" placeholder="Nome" required />
+            <input type="file" id="upload-file" accept="image/*,video/*" required />
+            <button class="btn primary" type="submit">Enviar</button>
+          </form>
+          <form id="content-form" class="card-form">
+            <h3>Texto / HTML / URL</h3>
+            <input type="text" id="content-name" placeholder="Nome" required />
+            <select id="content-type">
+              <option value="text">Texto</option>
+              <option value="html">HTML</option>
+              <option value="url">URL (página externa)</option>
+            </select>
+            <textarea id="content-value" placeholder="Conteúdo de texto/HTML, ou a URL"></textarea>
+            <button class="btn primary" type="submit">Criar</button>
+          </form>
+        </div>
+        <div id="media-list" class="cards"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
