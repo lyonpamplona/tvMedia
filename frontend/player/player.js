@@ -53,6 +53,95 @@
     statusDot.classList.toggle("online", online);
   }
 
+  // Conjunto de tags/atributos permitidos ao renderizar HTML de uma mídia.
+  // Defesa contra XSS: o conteúdo HTML é cadastrado no painel, mas ainda
+  // assim é higienizado antes de ir ao DOM (remove scripts, iframes, handlers
+  // de evento e URLs javascript:).
+  const ALLOWED_TAGS = new Set([
+    "B", "STRONG", "I", "EM", "U", "S", "P", "BR", "SPAN", "DIV",
+    "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "LI", "BLOCKQUOTE",
+    "HR", "IMG", "A", "SMALL", "SUB", "SUP", "TABLE", "THEAD", "TBODY",
+    "TR", "TD", "TH", "FONT", "CENTER",
+  ]);
+  const ALLOWED_ATTRS = new Set([
+    "style", "class", "src", "alt", "href", "title", "width", "height",
+    "align", "color",
+  ]);
+
+  /**
+   * Higieniza uma string HTML mantendo apenas tags/atributos seguros.
+   * @param {string} html HTML de origem (conteúdo da mídia).
+   * @returns {string} HTML seguro para atribuir via innerHTML.
+   */
+  function sanitizeHtml(html) {
+    const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+    const walk = (node) => {
+      for (const child of Array.from(node.childNodes)) {
+        if (child.nodeType === 1) {
+          if (!ALLOWED_TAGS.has(child.tagName)) {
+            child.remove();
+            continue;
+          }
+          for (const attr of Array.from(child.attributes)) {
+            const name = attr.name.toLowerCase();
+            const value = String(attr.value).trim().toLowerCase();
+            const unsafeUrl =
+              (name === "href" || name === "src") &&
+              value.startsWith("javascript:");
+            if (!ALLOWED_ATTRS.has(name) || name.startsWith("on") || unsafeUrl) {
+              child.removeAttribute(attr.name);
+            }
+          }
+          walk(child);
+        } else if (child.nodeType === 8) {
+          child.remove();
+        }
+      }
+    };
+    walk(doc.body);
+    return doc.body.innerHTML;
+  }
+
+  /**
+   * Acumula e envia eventos de reprodução (proof-of-play) em lotes.
+   *
+   * Cada item exibido gera um evento; os eventos são enviados periodicamente
+   * e ao sair/ocultar a página (via sendBeacon) para reduzir requisições.
+   */
+  const playReporter = {
+    queue: [],
+    register(zone, item) {
+      this.queue.push({
+        media_id: item.media_id == null ? null : item.media_id,
+        zone_id: zone.id == null ? null : zone.id,
+        media_name: item.name || "",
+        media_type: item.type || "",
+        duration_seconds: Math.round(item.duration || 0),
+      });
+      if (this.queue.length >= 50) this.flush();
+    },
+    flush(useBeacon = false) {
+      if (!this.queue.length || !screenSlug) return;
+      const events = this.queue.splice(0, this.queue.length);
+      const body = JSON.stringify({ events });
+      const url = `/api/display/${encodeURIComponent(screenSlug)}/events`;
+      try {
+        if (useBeacon && navigator.sendBeacon) {
+          navigator.sendBeacon(url, new Blob([body], { type: "application/json" }));
+        } else {
+          fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+            keepalive: true,
+          }).catch(() => {});
+        }
+      } catch (err) {
+        // Telemetria é best-effort; nunca deve interromper a reprodução.
+      }
+    },
+  };
+
   /**
    * Cria o elemento DOM correspondente a um item de mídia.
    * @param {Object} item Item de exibição resolvido pelo backend.
@@ -93,7 +182,7 @@
       case "html": {
         const div = document.createElement("div");
         div.className = "text-slide";
-        div.innerHTML = item.content || "";
+        div.innerHTML = sanitizeHtml(item.content || "");
         return div;
       }
       case "text":
@@ -152,6 +241,7 @@
       const items = this.zone.items;
       const item = items[idx];
       this.index = idx;
+      playReporter.register(this.zone, item);
 
       // Monta a nova camada.
       const layer = document.createElement("div");
@@ -294,6 +384,12 @@
     connectSocket();
     // Revalida a cada 60s (cobre trocas por agendamento sem evento explícito).
     pollTimer = setInterval(() => refresh(false), 60000);
+    // Envia a telemetria de reprodução periodicamente e ao sair da página.
+    setInterval(() => playReporter.flush(false), 30000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) playReporter.flush(true);
+    });
+    window.addEventListener("pagehide", () => playReporter.flush(true));
   }
 
   init();

@@ -1,8 +1,9 @@
 """Endpoints de gerenciamento de playlists e seus itens.
 
-Qualquer alteração em uma playlist dispara uma notificação em tempo real para
-todas as telas (uma playlist pode ser usada por várias zonas/telas e por
-agendamentos). Todas as rotas exigem autenticação.
+Alterações em uma playlist notificam, em tempo real, apenas as telas que a
+usam (zona padrão ou agendamento), via :func:`notify_playlist_screens`.
+A remoção notifica todas as telas por segurança. Todas as rotas exigem
+autenticação.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 from .. import crud, models, schemas
 from ..auth import require_auth
 from ..database import get_db
-from ..realtime import notify_all_screens
+from ..realtime import notify_all_screens, notify_playlist_screens
 
 router = APIRouter(
     prefix="/api/playlists", tags=["playlists"], dependencies=[Depends(require_auth)]
@@ -26,6 +27,16 @@ def _get_playlist_or_404(db: Session, playlist_id: int) -> models.Playlist:
     if playlist is None:
         raise HTTPException(status_code=404, detail="Playlist não encontrada.")
     return playlist
+
+
+def _get_item_or_404(
+    db: Session, playlist_id: int, item_id: int
+) -> models.PlaylistItem:
+    """Recupera um item garantindo que pertence à playlist informada."""
+    item = crud.get_playlist_item(db, item_id)
+    if item is None or item.playlist_id != playlist_id:
+        raise HTTPException(status_code=404, detail="Item não encontrado.")
+    return item
 
 
 @router.get("", response_model=list[schemas.PlaylistRead])
@@ -52,10 +63,10 @@ def create_playlist(
 async def update_playlist(
     playlist_id: int, data: schemas.PlaylistUpdate, db: Session = Depends(get_db)
 ) -> models.Playlist:
-    """Renomeia uma playlist e notifica as telas."""
+    """Renomeia uma playlist e notifica as telas que a utilizam."""
     playlist = _get_playlist_or_404(db, playlist_id)
     playlist = crud.update_playlist(db, playlist, data)
-    await notify_all_screens(db, reason="playlist-updated")
+    await notify_playlist_screens(db, playlist_id, reason="playlist-updated")
     return playlist
 
 
@@ -63,7 +74,7 @@ async def update_playlist(
     "/{playlist_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None
 )
 async def delete_playlist(playlist_id: int, db: Session = Depends(get_db)) -> None:
-    """Remove uma playlist e notifica as telas."""
+    """Remove uma playlist e seus itens; notifica todas as telas."""
     playlist = _get_playlist_or_404(db, playlist_id)
     crud.delete_playlist(db, playlist)
     await notify_all_screens(db, reason="playlist-deleted")
@@ -71,58 +82,52 @@ async def delete_playlist(playlist_id: int, db: Session = Depends(get_db)) -> No
 
 @router.post("/{playlist_id}/items", response_model=schemas.PlaylistRead, status_code=201)
 async def add_item(
-    playlist_id: int,
-    data: schemas.PlaylistItemCreate,
-    db: Session = Depends(get_db),
+    playlist_id: int, data: schemas.PlaylistItemCreate, db: Session = Depends(get_db)
 ) -> models.Playlist:
-    """Adiciona um item à playlist e retorna a playlist atualizada."""
+    """Adiciona um item de mídia a uma playlist."""
     playlist = _get_playlist_or_404(db, playlist_id)
     if crud.get_media(db, data.media_id) is None:
         raise HTTPException(status_code=400, detail="Mídia inexistente.")
-    crud.add_item(db, playlist, data)
-    await notify_all_screens(db, reason="item-added")
-    return _get_playlist_or_404(db, playlist_id)
+    playlist = crud.add_playlist_item(db, playlist, data)
+    await notify_playlist_screens(db, playlist_id, reason="playlist-item-added")
+    return playlist
 
 
-@router.patch("/{playlist_id}/items/{item_id}", response_model=schemas.PlaylistRead)
+@router.patch(
+    "/{playlist_id}/items/{item_id}", response_model=schemas.PlaylistRead
+)
 async def update_item(
     playlist_id: int,
     item_id: int,
     data: schemas.PlaylistItemUpdate,
     db: Session = Depends(get_db),
 ) -> models.Playlist:
-    """Atualiza duração/posição/ajuste/transição de um item."""
-    playlist = _get_playlist_or_404(db, playlist_id)
-    item = db.get(models.PlaylistItem, item_id)
-    if item is None or item.playlist_id != playlist.id:
-        raise HTTPException(status_code=404, detail="Item não encontrado.")
-    crud.update_item(db, item, data)
-    await notify_all_screens(db, reason="item-updated")
-    return _get_playlist_or_404(db, playlist_id)
+    """Atualiza um item da playlist (duração, ajuste, transição, etc.)."""
+    item = _get_item_or_404(db, playlist_id, item_id)
+    playlist = crud.update_playlist_item(db, item, data)
+    await notify_playlist_screens(db, playlist_id, reason="playlist-item-updated")
+    return playlist
 
 
-@router.delete("/{playlist_id}/items/{item_id}", response_model=schemas.PlaylistRead)
-async def delete_item(
+@router.delete(
+    "/{playlist_id}/items/{item_id}", response_model=schemas.PlaylistRead
+)
+async def remove_item(
     playlist_id: int, item_id: int, db: Session = Depends(get_db)
 ) -> models.Playlist:
-    """Remove um item da playlist."""
-    playlist = _get_playlist_or_404(db, playlist_id)
-    item = db.get(models.PlaylistItem, item_id)
-    if item is None or item.playlist_id != playlist.id:
-        raise HTTPException(status_code=404, detail="Item não encontrado.")
-    crud.remove_item(db, item)
-    await notify_all_screens(db, reason="item-removed")
-    return _get_playlist_or_404(db, playlist_id)
+    """Remove um item de uma playlist."""
+    item = _get_item_or_404(db, playlist_id, item_id)
+    playlist = crud.remove_playlist_item(db, item)
+    await notify_playlist_screens(db, playlist_id, reason="playlist-item-removed")
+    return playlist
 
 
 @router.post("/{playlist_id}/reorder", response_model=schemas.PlaylistRead)
-async def reorder_items(
-    playlist_id: int,
-    data: schemas.ReorderRequest,
-    db: Session = Depends(get_db),
+async def reorder(
+    playlist_id: int, data: schemas.ReorderRequest, db: Session = Depends(get_db)
 ) -> models.Playlist:
-    """Reordena os itens de uma playlist conforme a sequência informada."""
+    """Reordena os itens de uma playlist conforme a sequência de IDs."""
     playlist = _get_playlist_or_404(db, playlist_id)
-    crud.reorder_items(db, playlist, data.item_ids)
-    await notify_all_screens(db, reason="reordered")
-    return _get_playlist_or_404(db, playlist_id)
+    playlist = crud.reorder_items(db, playlist, data.item_ids)
+    await notify_playlist_screens(db, playlist_id, reason="playlist-reordered")
+    return playlist
