@@ -71,16 +71,23 @@
         const video = document.createElement("video");
         video.src = item.url;
         video.autoplay = true;
-        video.muted = true;        // necessário para autoplay sem interação
+        video.muted = item.muted !== false;  // som conforme configuração do item
         video.playsInline = true;
         video.controls = false;
         video.addEventListener("ended", onVideoEnded);
         return video;
       }
+      case "youtube":
+      case "embed":
       case "url": {
         const iframe = document.createElement("iframe");
         iframe.src = item.url;
         iframe.setAttribute("frameborder", "0");
+        iframe.setAttribute(
+          "allow",
+          "autoplay; encrypted-media; picture-in-picture; fullscreen"
+        );
+        iframe.allowFullscreen = true;
         return iframe;
       }
       case "html": {

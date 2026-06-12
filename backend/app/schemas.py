@@ -92,6 +92,9 @@ class PlaylistItemCreate(BaseModel):
     transition: Transition = Field(
         Transition.fade, description="Efeito de entrada do item."
     )
+    muted: bool = Field(
+        True, description="True silencia o áudio (recomendado para autoplay)."
+    )
 
 
 class PlaylistItemUpdate(BaseModel):
@@ -101,6 +104,7 @@ class PlaylistItemUpdate(BaseModel):
     position: int | None = None
     fit: FitMode | None = None
     transition: Transition | None = None
+    muted: bool | None = None
 
 
 class PlaylistItemRead(BaseModel):
@@ -114,6 +118,7 @@ class PlaylistItemRead(BaseModel):
     duration: int
     fit: FitMode
     transition: Transition
+    muted: bool
     media: MediaRead
 
 
@@ -287,6 +292,7 @@ class DisplayItem(BaseModel):
     name: str
     fit: FitMode
     transition: Transition
+    muted: bool = True
     url: str | None = None
     content: str | None = None
 

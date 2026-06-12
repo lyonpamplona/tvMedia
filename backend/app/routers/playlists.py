@@ -59,7 +59,9 @@ async def update_playlist(
     return playlist
 
 
-@router.delete("/{playlist_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{playlist_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None
+)
 async def delete_playlist(playlist_id: int, db: Session = Depends(get_db)) -> None:
     """Remove uma playlist e notifica as telas."""
     playlist = _get_playlist_or_404(db, playlist_id)
