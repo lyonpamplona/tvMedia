@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from .config import settings
@@ -26,7 +26,35 @@ engine = create_engine(
     settings.database_url,
     connect_args=_connect_args,
     future=True,
+    # Pool pequeno: poucas conexões simultâneas bastam para um único worker e
+    # evitam manter muitos buffers de cache do SQLite em memória.
+    pool_size=5,
+    max_overflow=5,
+    pool_pre_ping=True,
+    pool_recycle=1800,
 )
+
+
+if settings.database_url.startswith("sqlite"):
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, connection_record) -> None:
+        """Aplica PRAGMAs voltados a baixo uso de memória e boa concorrência.
+
+        * ``journal_mode=WAL`` + ``synchronous=NORMAL``: leituras e escritas
+          concorrentes sem travar, com bom equilíbrio de durabilidade.
+        * ``cache_size=-2000``: limita o cache de páginas a ~2 MB por conexão.
+        * ``temp_store=MEMORY`` e ``mmap_size=0``: mantêm o uso de RAM previsível.
+        * ``busy_timeout``: aguarda em vez de falhar sob contenção de escrita.
+        """
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA cache_size=-2000")
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        cursor.execute("PRAGMA mmap_size=0")
+        cursor.close()
 
 SessionLocal = sessionmaker(
     bind=engine,
