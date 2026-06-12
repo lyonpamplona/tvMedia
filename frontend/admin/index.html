@@ -1,98 +1,75 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AdSignage — Painel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AdSignage Studio</title>
+  <meta name="description" content="Painel de edicao profissional para sinalizacao digital" />
+
+  <!-- PWA -->
+  <meta name="theme-color" content="#1a1b26" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- Tela de login (exibida quando não há token válido). -->
-  <div id="login" class="login-overlay">
-    <form id="login-form" class="login-card">
-      <h1>📺 AdSignage</h1>
-      <p class="muted">Entre com a senha do painel.</p>
-      <input type="password" id="login-password" placeholder="Senha" autocomplete="current-password" required />
-      <button type="submit" class="btn primary">Entrar</button>
-      <p id="login-error" class="error"></p>
+  <!-- Tela de login -->
+  <div class="login-overlay" id="login">
+    <form class="login-card" id="login-form">
+      <div class="login-brand"><span class="login-mark" id="login-mark"></span><span>AdSignage <b>Studio</b></span></div>
+      <p class="login-sub">Painel de edicao de sinalizacao digital</p>
+      <label class="login-field"><span>Senha</span>
+        <input type="password" id="login-password" placeholder="Senha do painel" autocomplete="current-password" required />
+      </label>
+      <button type="submit" class="btn primary block">Entrar</button>
+      <p class="login-error" id="login-error"></p>
     </form>
   </div>
 
-  <!-- Aplicação (exibida após login). -->
-  <div id="app" class="app hidden">
-    <header class="topbar">
-      <div class="brand">📺 AdSignage</div>
-      <nav class="tabs">
-        <button class="tab active" data-tab="screens">Telas</button>
-        <button class="tab" data-tab="playlists">Playlists</button>
-        <button class="tab" data-tab="media">Mídias</button>
-      </nav>
-      <button id="logout" class="btn ghost">Sair</button>
+  <!-- IDE -->
+  <div class="ide hidden" id="ide">
+    <header class="titlebar">
+      <div class="brand"><span class="brand-mark" id="brand-mark"></span><span class="brand-text">AdSignage <b>Studio</b></span></div>
+      <nav class="menu" id="menu"></nav>
+      <div class="title-center" id="title-center"></div>
+      <div class="title-actions">
+        <button class="cmd-open" id="cmd-open" title="Paleta de comandos (Ctrl+K)"><span id="cmd-open-icon"></span><span class="cmd-label">Comandos</span><kbd>Ctrl K</kbd></button>
+        <button class="icon-btn" id="logout" title="Sair"><span id="logout-icon"></span></button>
+      </div>
     </header>
 
-    <main class="content">
-      <!-- ============================ TELAS ============================ -->
-      <section id="tab-screens" class="tab-panel active">
-        <div class="panel-head">
-          <h2>Telas</h2>
-          <form id="screen-form" class="inline-form">
-            <input type="text" id="screen-name" placeholder="Nome da tela" required />
-            <input type="text" id="screen-tz" placeholder="Fuso (ex.: America/Sao_Paulo)" value="America/Sao_Paulo" />
-            <button class="btn primary" type="submit">Adicionar</button>
-          </form>
-        </div>
-        <div id="screens-list" class="cards"></div>
-      </section>
+    <div class="body">
+      <nav class="activitybar" id="activitybar" aria-label="Secoes"></nav>
+      <aside class="sidebar" id="sidebar"></aside>
 
-      <!-- ========================== PLAYLISTS ========================== -->
-      <section id="tab-playlists" class="tab-panel">
-        <div class="panel-head">
-          <h2>Playlists</h2>
-          <form id="playlist-form" class="inline-form">
-            <input type="text" id="playlist-name" placeholder="Nome da playlist" required />
-            <button class="btn primary" type="submit">Criar</button>
-          </form>
-        </div>
-        <div class="split">
-          <div id="playlists-list" class="list"></div>
-          <div id="playlist-detail" class="detail">
-            <p class="muted">Selecione uma playlist para editar seus itens.</p>
-          </div>
+      <section class="editor">
+        <div class="tabsbar" id="tabsbar"></div>
+        <div class="doc" id="doc"></div>
+        <div class="bottompanel">
+          <div class="bottom-tabs" id="bottom-tabs"></div>
+          <div class="bottom-content" id="bottom-content"></div>
         </div>
       </section>
 
-      <!-- ============================ MÍDIAS ========================== -->
-      <section id="tab-media" class="tab-panel">
-        <div class="panel-head">
-          <h2>Mídias</h2>
-        </div>
-        <div class="media-forms">
-          <form id="upload-form" class="card-form">
-            <h3>Enviar imagem/vídeo</h3>
-            <input type="text" id="upload-name" placeholder="Nome" required />
-            <input type="file" id="upload-file" accept="image/*,video/*" required />
-            <button class="btn primary" type="submit">Enviar</button>
-          </form>
-          <form id="content-form" class="card-form">
-            <h3>Texto / HTML / URL</h3>
-            <input type="text" id="content-name" placeholder="Nome" required />
-            <select id="content-type">
-              <option value="text">Texto</option>
-              <option value="html">HTML</option>
-              <option value="url">URL (página externa)</option>
-              <option value="youtube">YouTube (vídeo/playlist)</option>
-              <option value="embed">Embed música (Spotify, etc.)</option>
-            </select>
-            <textarea id="content-value" placeholder="Conteúdo de texto/HTML, ou a URL"></textarea>
-            <button class="btn primary" type="submit">Criar</button>
-          </form>
-        </div>
-        <div id="media-list" class="cards"></div>
-      </section>
-    </main>
+      <aside class="inspector" id="inspector"></aside>
+    </div>
+
+    <footer class="statusbar" id="statusbar"></footer>
   </div>
 
-  <div id="toast" class="toast"></div>
+  <!-- Paleta de comandos -->
+  <div class="palette-overlay" id="palette" hidden>
+    <div class="palette">
+      <input id="palette-input" type="text" placeholder="Digite um comando ou busque..." autocomplete="off" />
+      <ul id="palette-list"></ul>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
   <script src="app.js"></script>
 </body>
 </html>
