@@ -1,4 +1,4 @@
-"""Pacote principal da aplicação tvMedia (backend FastAPI).
+"""Pacote principal da aplicação AdSignage (backend FastAPI).
 
 Este pacote concentra toda a lógica do servidor responsável por:
 
