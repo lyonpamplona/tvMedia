@@ -14,23 +14,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import FitMode, MediaType, Transition
-
-
-# --------------------------------------------------------------------------- #
-# Autenticação
-# --------------------------------------------------------------------------- #
-class LoginRequest(BaseModel):
-    """Payload de login do painel."""
-
-    password: str = Field(..., description="Senha do painel administrativo.")
-
-
-class TokenResponse(BaseModel):
-    """Resposta de login contendo o token de sessão assinado."""
-
-    token: str
-    expires_in: int = Field(..., description="Validade do token em segundos.")
+from .models import MediaType
 
 
 # --------------------------------------------------------------------------- #
@@ -88,13 +72,6 @@ class PlaylistItemCreate(BaseModel):
     position: int | None = Field(
         None, description="Posição desejada; ao final se omitido."
     )
-    fit: FitMode = Field(FitMode.contain, description="Modo de ajuste à zona.")
-    transition: Transition = Field(
-        Transition.fade, description="Efeito de entrada do item."
-    )
-    muted: bool = Field(
-        True, description="True silencia o áudio (recomendado para autoplay)."
-    )
 
 
 class PlaylistItemUpdate(BaseModel):
@@ -102,9 +79,6 @@ class PlaylistItemUpdate(BaseModel):
 
     duration: int | None = Field(None, ge=1, le=86400)
     position: int | None = None
-    fit: FitMode | None = None
-    transition: Transition | None = None
-    muted: bool | None = None
 
 
 class PlaylistItemRead(BaseModel):
@@ -116,9 +90,6 @@ class PlaylistItemRead(BaseModel):
     media_id: int
     position: int
     duration: int
-    fit: FitMode
-    transition: Transition
-    muted: bool
     media: MediaRead
 
 
@@ -158,105 +129,14 @@ class ReorderRequest(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
-# Schedule (agendamento)
-# --------------------------------------------------------------------------- #
-class ScheduleBase(BaseModel):
-    """Campos de uma regra de agendamento de zona."""
-
-    playlist_id: int = Field(..., description="Playlist exibida quando ativa.")
-    days_of_week: str = Field(
-        "0,1,2,3,4,5,6",
-        description="Dias da semana (CSV, 0=segunda … 6=domingo).",
-    )
-    start_minute: int = Field(
-        0, ge=0, le=1440, description="Início (minutos desde a meia-noite)."
-    )
-    end_minute: int = Field(
-        1440, ge=0, le=1440, description="Fim (minutos desde a meia-noite)."
-    )
-    priority: int = Field(0, description="Maior vence em caso de sobreposição.")
-
-
-class ScheduleCreate(ScheduleBase):
-    """Payload para criar um agendamento."""
-
-
-class ScheduleUpdate(BaseModel):
-    """Campos opcionais para atualizar um agendamento."""
-
-    playlist_id: int | None = None
-    days_of_week: str | None = None
-    start_minute: int | None = Field(None, ge=0, le=1440)
-    end_minute: int | None = Field(None, ge=0, le=1440)
-    priority: int | None = None
-
-
-class ScheduleRead(ScheduleBase):
-    """Representação de um agendamento."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    zone_id: int
-
-
-# --------------------------------------------------------------------------- #
-# Zone
-# --------------------------------------------------------------------------- #
-class ZoneBase(BaseModel):
-    """Geometria e playlist padrão de uma zona (valores em % da tela)."""
-
-    name: str = Field("Zona", max_length=255)
-    x: float = Field(0.0, ge=0, le=100)
-    y: float = Field(0.0, ge=0, le=100)
-    width: float = Field(100.0, ge=1, le=100)
-    height: float = Field(100.0, ge=1, le=100)
-    z_index: int = Field(0)
-    default_playlist_id: int | None = Field(
-        None, description="Playlist exibida fora de qualquer agendamento."
-    )
-
-
-class ZoneCreate(ZoneBase):
-    """Payload para criar uma zona em uma tela."""
-
-
-class ZoneUpdate(BaseModel):
-    """Campos opcionais para atualizar uma zona."""
-
-    name: str | None = Field(None, max_length=255)
-    x: float | None = Field(None, ge=0, le=100)
-    y: float | None = Field(None, ge=0, le=100)
-    width: float | None = Field(None, ge=1, le=100)
-    height: float | None = Field(None, ge=1, le=100)
-    z_index: int | None = None
-    default_playlist_id: int | None = None
-
-
-class ZoneRead(ZoneBase):
-    """Representação de uma zona, com seus agendamentos."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    screen_id: int
-    schedules: list[ScheduleRead] = []
-
-
-# --------------------------------------------------------------------------- #
 # Screen
 # --------------------------------------------------------------------------- #
 class ScreenCreate(BaseModel):
-    """Payload para registrar uma nova tela.
-
-    Por padrão, a tela é criada com uma única zona cobrindo 100% (modo
-    simples). Use os endpoints de zona para criar layouts com múltiplas zonas.
-    """
+    """Payload para registrar uma nova tela."""
 
     name: str = Field(..., max_length=255)
-    timezone: str = Field("America/Sao_Paulo", description="Fuso IANA da tela.")
-    default_playlist_id: int | None = Field(
-        None, description="Playlist da zona principal criada automaticamente."
+    playlist_id: int | None = Field(
+        None, description="Playlist inicial atribuída à tela."
     )
 
 
@@ -264,21 +144,20 @@ class ScreenUpdate(BaseModel):
     """Campos opcionais para atualizar uma tela."""
 
     name: str | None = Field(None, max_length=255)
-    timezone: str | None = None
+    playlist_id: int | None = Field(None, description="Nova playlist (ou null).")
 
 
 class ScreenRead(BaseModel):
-    """Representação de uma tela retornada pela API, com suas zonas."""
+    """Representação de uma tela retornada pela API."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     name: str
     slug: str
-    timezone: str
+    playlist_id: int | None = None
     created_at: datetime
     last_seen: datetime | None = None
-    zones: list[ZoneRead] = []
 
 
 # --------------------------------------------------------------------------- #
@@ -290,30 +169,14 @@ class DisplayItem(BaseModel):
     type: MediaType
     duration: int
     name: str
-    fit: FitMode
-    transition: Transition
-    muted: bool = True
     url: str | None = None
     content: str | None = None
-
-
-class DisplayZone(BaseModel):
-    """Zona resolvida (geometria + itens da playlist ativa no momento)."""
-
-    id: int
-    name: str
-    x: float
-    y: float
-    width: float
-    height: float
-    z_index: int
-    playlist_name: str | None = None
-    items: list[DisplayItem] = []
 
 
 class DisplayPayload(BaseModel):
     """Conteúdo completo que o player precisa para reproduzir uma tela."""
 
     screen: str
+    playlist_name: str | None = None
     revision: str
-    zones: list[DisplayZone] = []
+    items: list[DisplayItem] = []
