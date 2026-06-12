@@ -16,7 +16,7 @@ from pathlib import Path
 
 from .config import settings
 
-_logger = logging.getLogger("adsignage.backup")
+_logger = logging.getLogger("tvmedia.backup")
 
 
 def _sqlite_path() -> Path | None:
@@ -40,7 +40,7 @@ def create_backup() -> Path | None:
 
     settings.backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    destination = settings.backup_dir / f"adsignage-{stamp}.db"
+    destination = settings.backup_dir / f"tvmedia-{stamp}.db"
 
     src_conn = sqlite3.connect(str(source))
     try:
@@ -69,7 +69,7 @@ def rotate_backups(keep: int | None = None) -> list[Path]:
     if not settings.backup_dir.exists():
         return []
     backups = sorted(
-        settings.backup_dir.glob("adsignage-*.db"),
+        settings.backup_dir.glob("tvmedia-*.db"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )

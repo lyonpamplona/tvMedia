@@ -438,7 +438,7 @@
       } else if (act === "add-media") { openMediaModal(); }
       else if (act === "bulk-import") { openBulkModal(); }
       else if (act === "new-folder") { await createFolder(); }
-      else if (act === "preview") { const s = screen(); if (s) window.open(playerUrl(s.id), "_blank"); else toast({ kind: "warn", msg: "Selecione uma tela primeiro." }); }
+      else if (act === "preview") { const s = screen(); if (s) window.open(playerUrl(s.slug), "_blank"); else toast({ kind: "warn", msg: "Selecione uma tela primeiro." }); }
     } catch (err) { toast({ kind: "err", msg: err.message }); }
   }
 
@@ -611,7 +611,6 @@
   }
   async function deleteSchedule(zoneId, schedId) { try { await api("/api/zones/" + zoneId + "/schedules/" + schedId, { method: "DELETE" }); await loadScreens(); renderInspector(); renderBottom(); toast({ kind: "warn", msg: "Agendamento removido." }); } catch (err) { toast({ kind: "err", msg: err.message }); } }
 
-  // ----------------------------- Midias ---------------------------- //
   // ============================ Midias ============================== //
   function folderName(id) { const f = state.folders.find((x) => x.id === id); return f ? f.name : null; }
   function mediaFolderOptions(sel) {
@@ -1041,7 +1040,7 @@
   // Guia de uso exibido automaticamente nas primeiras vezes que o painel e
   // acessado. O estado fica em localStorage para nao reabrir a cada visita;
   // pode ser reaberto a qualquer momento pela paleta de comandos.
-  const ONBOARD_KEY = "adsignage_onboarded";
+  const ONBOARD_KEY = "tvmedia_onboarded";
   const TOUR = [
     { icon: "logo", title: "Bem-vindo ao tvMedia Studio", text: "Este painel controla o que aparece nas suas TVs. Em poucos passos voce cria uma tela, envia midias, monta uma sequencia e publica. Use Anterior e Proximo para navegar neste guia." },
     { icon: "screen", title: "1. Telas", text: "Cada tela representa uma TV. Na secao Telas voce cria a tela e desenha Zonas: areas onde o conteudo aparece. Arraste e redimensione as zonas direto no canvas, como caixas na tela." },
