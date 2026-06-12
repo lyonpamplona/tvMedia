@@ -14,6 +14,20 @@ conteúdo no painel e ele aparece **na hora** nas telas, via WebSocket.
 - 🗂️ **Múltiplas zonas por tela** (ex.: conteúdo principal + faixa de notícias)
 - ⏰ **Agendamento** de playlists por dia da semana e faixa de horário
 - 🎬 **Transições** (fade/slide/none) e **modo de ajuste** (contain/cover/fill)
+- ▶️ **YouTube e música**: vídeos/playlists do YouTube e embeds do Spotify,
+  com **controle de som por item** (mudo por padrão)
+
+### Reprodução de vídeo e áudio (autoplay)
+
+- Vídeos enviados (`video`) e do YouTube reproduzem em loop automaticamente.
+- Por padrão os itens iniciam **sem som** (`mudo`), pois a maioria dos navegadores
+  bloqueia autoplay com áudio. Para tocar música/vídeo **com som** na TV:
+  1. Desmarque "mudo" no item (no painel), e
+  2. Inicie o navegador da TV em modo quiosque permitindo autoplay, ex.:
+     `chromium --kiosk --autoplay-policy=no-user-gesture-required "http://SERVIDOR:8000/player/?screen=SLUG"`
+- Para YouTube, cole o link normal (`watch?v=`, `youtu.be/...` ou `playlist?list=...`);
+  o sistema converte para o embed correto. Para Spotify, cole o link de
+  compartilhamento da faixa/álbum/playlist.
 
 ---
 
@@ -58,7 +72,8 @@ adsignage/
 
 ### Modelo de dados
 
-- **Media** — conteúdo exibível: `image`, `video`, `text`, `html` ou `url`.
+- **Media** — conteúdo exibível: `image`, `video`, `text`, `html`, `url`,
+  `youtube` (vídeo ou playlist) ou `embed` (Spotify e outros players).
 - **Playlist** — sequência ordenada de itens, reproduzida em loop.
 - **PlaylistItem** — liga uma mídia a uma playlist, com `position`, `duration`,
   `fit` (contain/cover/fill) e `transition` (fade/slide/none).

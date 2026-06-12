@@ -20,6 +20,7 @@ import secrets
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum,
     Float,
@@ -42,6 +43,8 @@ class MediaType(str, enum.Enum):
     text = "text"
     html = "html"
     url = "url"
+    youtube = "youtube"  # vídeo ou playlist do YouTube
+    embed = "embed"      # player incorporado (Spotify, YouTube Music, etc.)
 
 
 class FitMode(str, enum.Enum):
@@ -140,6 +143,8 @@ class PlaylistItem(Base):
     transition: Mapped[Transition] = mapped_column(
         Enum(Transition), nullable=False, default=Transition.fade
     )
+    # Áudio: True silencia (necessário para autoplay confiável em muitos navegadores).
+    muted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     playlist: Mapped["Playlist"] = relationship(back_populates="items")
     media: Mapped["Media"] = relationship(back_populates="items")

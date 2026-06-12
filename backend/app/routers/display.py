@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
 from ..database import SessionLocal, get_db
+from ..embeds import build_embed_url
 from ..websocket_manager import manager
 
 router = APIRouter(tags=["display"])
@@ -63,6 +64,10 @@ def _build_zone_payload(
     items: list[schemas.DisplayItem] = []
     if playlist is not None:
         for item in sorted(playlist.items, key=lambda i: i.position):
+            if item.media.type in (models.MediaType.youtube, models.MediaType.embed):
+                media_url = build_embed_url(item.media, muted=item.muted)
+            else:
+                media_url = _media_url(request, item.media)
             items.append(
                 schemas.DisplayItem(
                     type=item.media.type,
@@ -70,7 +75,8 @@ def _build_zone_payload(
                     name=item.media.name,
                     fit=item.fit,
                     transition=item.transition,
-                    url=_media_url(request, item.media),
+                    muted=item.muted,
+                    url=media_url,
                     content=item.media.content,
                 )
             )

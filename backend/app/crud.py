@@ -130,6 +130,7 @@ def add_item(
         position=next_position,
         fit=data.fit,
         transition=data.transition,
+        muted=data.muted,
     )
     db.add(item)
     db.commit()
