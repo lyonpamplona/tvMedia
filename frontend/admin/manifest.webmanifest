@@ -1,6 +1,6 @@
 {
-  "name": "AdSignage Studio",
-  "short_name": "Studio",
+  "name": "tvMedia Studio",
+  "short_name": "tvMedia",
   "description": "Painel de edicao profissional para sinalizacao digital",
   "start_url": ".",
   "scope": ".",

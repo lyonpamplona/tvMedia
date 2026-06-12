@@ -1,5 +1,5 @@
 /**
- * AdSignage — Player de TV (v2, multi-zona).
+ * tvMedia — Player de TV (v2, multi-zona).
  *
  * Responsabilidades:
  *  - Ler o slug da tela a partir de `?screen=<slug>` na URL.

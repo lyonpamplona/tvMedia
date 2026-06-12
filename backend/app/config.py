@@ -69,7 +69,7 @@ class Settings:
     """
 
     def __init__(self) -> None:
-        self.app_name: str = os.getenv("APP_NAME", "AdSignage")
+        self.app_name: str = os.getenv("APP_NAME", "tvMedia")
         self.environment: str = os.getenv("ENVIRONMENT", "development").lower()
         self.debug: bool = _env_bool("DEBUG", False)
 
