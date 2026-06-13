@@ -273,6 +273,7 @@ class PlaylistItemCreate(BaseModel):
     focal: str = Field("center", max_length=16, description="Ponto focal do recorte (cover).")
     transition: Transition = Field(Transition.fade, description="Efeito de entrada.")
     muted: bool = Field(True, description="True silencia (recomendado p/ autoplay).")
+    play_full: bool = Field(False, description="Tocar a midia inteira (video/audio/YouTube).")
 
 
 class PlaylistItemUpdate(BaseModel):
@@ -284,6 +285,7 @@ class PlaylistItemUpdate(BaseModel):
     focal: str | None = Field(None, max_length=16)
     transition: Transition | None = None
     muted: bool | None = None
+    play_full: bool | None = None
 
 
 class PlaylistItemRead(BaseModel):
@@ -299,6 +301,7 @@ class PlaylistItemRead(BaseModel):
     focal: str = "center"
     transition: Transition
     muted: bool
+    play_full: bool = False
     media: MediaRead
 
 
@@ -552,6 +555,7 @@ class DisplayItem(BaseModel):
     focal: str = "center"
     transition: Transition
     muted: bool = True
+    play_full: bool = False
     url: str | None = None
     poster: str | None = None
     content: str | None = None

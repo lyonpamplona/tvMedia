@@ -266,7 +266,8 @@
       const text = (list || []).filter(Boolean);
       if (!text.length) { move.innerHTML = '<span class="t-item">Sem itens para exibir.</span>'; return; }
       const html = text.map((s) => '<span class="t-item">' + s + '</span>').join('<span class="t-sep">\u2022</span>');
-      move.innerHTML = html + '<span class="t-sep">\u2022</span>' + html;
+      const unit = html + '<span class="t-sep">\u2022</span>';
+      move.innerHTML = unit + unit;
       move.style.animationDuration = speed + "s";
     };
     return { wrap: wrap, render: render };
@@ -305,6 +306,36 @@
   }
 
   const FOCAL_POS = { center: "center", top: "top center", bottom: "bottom center", left: "center left", right: "center right" };
+  let __ytApiPromise = null;
+  function loadYouTubeApi() {
+    if (window.YT && window.YT.Player) return Promise.resolve();
+    if (__ytApiPromise) return __ytApiPromise;
+    __ytApiPromise = new Promise((resolve) => {
+      const prev = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => {
+        if (typeof prev === "function") { try { prev(); } catch (e) {} }
+        resolve();
+      };
+      const tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(tag);
+    });
+    return __ytApiPromise;
+  }
+  let __ytSeq = 0;
+  function setupYouTubeEnd(iframe, onEnded) {
+    if (!iframe.id) iframe.id = "yt-frame-" + (++__ytSeq);
+    loadYouTubeApi().then(() => {
+      try {
+        new window.YT.Player(iframe.id, {
+          events: {
+            onStateChange: (e) => { if (e.data === window.YT.PlayerState.ENDED) onEnded(); },
+          },
+        });
+      } catch (e) { /* sem deteccao de fim: mantem comportamento atual */ }
+    });
+  }
+
   function createMediaElement(item, onVideoEnded) {
     switch (item.type) {
       case "image": {
@@ -324,6 +355,22 @@
         video.addEventListener("ended", onVideoEnded);
         return video;
       }
+      case "audio": {
+        const wrap = document.createElement("div");
+        wrap.className = "text-slide audio-card";
+        const label = document.createElement("div");
+        label.className = "audio-label";
+        label.textContent = "\u266A " + (item.name || "\u00c1udio");
+        const audio = document.createElement("audio");
+        audio.src = item.url;
+        audio.autoplay = true;
+        audio.controls = false;
+        audio.muted = item.muted === true;
+        if (item.play_full) audio.addEventListener("ended", onVideoEnded);
+        wrap.appendChild(label);
+        wrap.appendChild(audio);
+        return wrap;
+      }
       case "youtube":
       case "embed":
       case "url": {
@@ -335,6 +382,9 @@
           "autoplay; encrypted-media; picture-in-picture; fullscreen"
         );
         iframe.allowFullscreen = true;
+        if (item.type === "youtube" && item.play_full) {
+          setupYouTubeEnd(iframe, onVideoEnded);
+        }
         return iframe;
       }
       case "clock":
@@ -438,8 +488,10 @@
         }
       }
 
-      // Vídeos avançam no evento `ended`; demais usam timer por duração.
-      if (item.type !== "video" && items.length > 1) {
+      // Vídeos e itens "tocar completo" avançam no fim; demais usam timer.
+      const playsToEnd = item.type === "video"
+        || (item.play_full && (item.type === "audio" || item.type === "youtube"));
+      if (!playsToEnd && items.length > 1) {
         const ms = Math.max(1, item.duration || 10) * 1000;
         this.timer = setTimeout(advance, ms);
       }
