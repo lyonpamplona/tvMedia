@@ -1,87 +1,111 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-BR" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AdSignage — Painel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>tvMedia Studio</title>
+  <meta name="description" content="Painel de edicao profissional para sinalizacao digital" />
+
+  <!-- PWA -->
+  <meta name="theme-color" content="#1a1b26" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <h1>📺 AdSignage</h1>
-    <span class="subtitle">Painel de administração — edição em tempo real</span>
-  </header>
+  <!-- Tela de login -->
+  <div class="login-overlay" id="login">
+    <form class="login-card" id="login-form">
+      <div class="login-brand"><span class="login-mark" id="login-mark"></span><span>tvMedia <b>Studio</b></span></div>
+      <p class="login-sub">Painel de edicao de sinalizacao digital</p>
+      <label class="login-field"><span>Usuario</span>
+        <input type="text" id="login-username" placeholder="Usuario (deixe vazio p/ admin)" autocomplete="username" />
+      </label>
+      <label class="login-field"><span>Senha</span>
+        <input type="password" id="login-password" placeholder="Senha do painel" autocomplete="current-password" required />
+      </label>
+      <button type="submit" class="btn primary block">Entrar</button>
+      <p class="login-error" id="login-error"></p>
+    </form>
+  </div>
 
-  <nav class="tabs">
-    <button class="tab active" data-tab="screens">Telas</button>
-    <button class="tab" data-tab="playlists">Playlists</button>
-    <button class="tab" data-tab="media">Mídias</button>
-  </nav>
-
-  <main>
-    <!-- ================= TELAS ================= -->
-    <section id="tab-screens" class="panel active">
-      <div class="panel-header">
-        <h2>Telas (TVs)</h2>
+  <!-- IDE -->
+  <div class="ide hidden" id="ide">
+    <header class="titlebar">
+      <div class="brand"><span class="brand-mark" id="brand-mark"></span><span class="brand-text">tvMedia <b>Studio</b></span></div>
+      <nav class="menu" id="menu"></nav>
+      <div class="title-center" id="title-center"></div>
+      <div class="title-actions">
+        <button class="cmd-open" id="cmd-open" title="Paleta de comandos (Ctrl+K)"><span id="cmd-open-icon"></span><span class="cmd-label">Comandos</span><kbd>Ctrl K</kbd></button>
+        <button class="icon-btn" id="logout" title="Sair"><span id="logout-icon"></span></button>
       </div>
-      <form id="screen-form" class="inline-form">
-        <input type="text" id="screen-name" placeholder="Nome da tela (ex.: Vitrine Loja 1)" required />
-        <select id="screen-playlist"><option value="">Sem playlist</option></select>
-        <button type="submit">Adicionar tela</button>
-      </form>
-      <div id="screens-list" class="cards"></div>
-    </section>
+    </header>
 
-    <!-- ================= PLAYLISTS ================= -->
-    <section id="tab-playlists" class="panel">
-      <div class="panel-header">
-        <h2>Playlists</h2>
+    <div class="body">
+      <nav class="activitybar" id="activitybar" aria-label="Secoes"></nav>
+      <aside class="sidebar" id="sidebar"></aside>
+
+      <section class="editor">
+        <div class="tabsbar" id="tabsbar"></div>
+        <div class="doc" id="doc"></div>
+        <div class="bottompanel">
+          <div class="bottom-tabs" id="bottom-tabs"></div>
+          <div class="bottom-content" id="bottom-content"></div>
+        </div>
+      </section>
+
+      <aside class="inspector" id="inspector"></aside>
+    </div>
+
+    <footer class="statusbar" id="statusbar"></footer>
+  </div>
+
+  <!-- Console dedicado de Super Admin -->
+  <div class="sa-overlay hidden" id="superadmin">
+    <header class="sa-top">
+      <div class="sa-brand"><span class="sa-mark" id="sa-mark"></span><span>tvMedia <b>Super Admin</b></span></div>
+      <nav class="sa-tabs" id="sa-tabs"></nav>
+      <div class="sa-actions">
+        <button class="btn" id="sa-open-studio"><span id="sa-studio-ico"></span> Abrir Studio</button>
+        <button class="icon-btn" id="sa-logout" title="Sair"><span id="sa-logout-ico"></span></button>
       </div>
-      <form id="playlist-form" class="inline-form">
-        <input type="text" id="playlist-name" placeholder="Nome da playlist" required />
-        <button type="submit">Criar playlist</button>
-      </form>
-      <div class="split">
-        <div id="playlists-list" class="list"></div>
-        <div id="playlist-editor" class="editor">
-          <p class="muted">Selecione uma playlist para editar.</p>
+    </header>
+    <div class="sa-body" id="sa-body"></div>
+  </div>
+
+  <!-- Paleta de comandos -->
+  <div class="palette-overlay" id="palette" hidden>
+    <div class="palette">
+      <input id="palette-input" type="text" placeholder="Digite um comando ou busque..." autocomplete="off" />
+      <ul id="palette-list"></ul>
+    </div>
+  </div>
+
+  <!-- Guia de uso / tutorial (abre nas primeiras vezes) -->
+  <div class="onboard-overlay" id="onboard" hidden>
+    <div class="onboard-card" role="dialog" aria-modal="true" aria-labelledby="onboard-title">
+      <div class="onboard-figure" id="onboard-figure"></div>
+      <div class="onboard-body">
+        <span class="onboard-step" id="onboard-step"></span>
+        <h2 id="onboard-title"></h2>
+        <p id="onboard-text"></p>
+      </div>
+      <div class="onboard-dots" id="onboard-dots"></div>
+      <div class="onboard-actions">
+        <button type="button" class="btn ghost" id="onboard-skip">Pular guia</button>
+        <div class="onboard-nav">
+          <button type="button" class="btn" id="onboard-prev">Anterior</button>
+          <button type="button" class="btn primary" id="onboard-next">Proximo</button>
         </div>
       </div>
-    </section>
+    </div>
+  </div>
 
-    <!-- ================= MÍDIAS ================= -->
-    <section id="tab-media" class="panel">
-      <div class="panel-header">
-        <h2>Mídias</h2>
-      </div>
-
-      <div class="split">
-        <form id="upload-form" class="stack-form">
-          <h3>Enviar arquivo (imagem/vídeo)</h3>
-          <input type="text" id="upload-name" placeholder="Nome" required />
-          <input type="file" id="upload-file" accept="image/*,video/*" required />
-          <button type="submit">Enviar</button>
-        </form>
-
-        <form id="content-form" class="stack-form">
-          <h3>Criar texto / HTML / URL</h3>
-          <input type="text" id="content-name" placeholder="Nome" required />
-          <select id="content-type">
-            <option value="text">Texto</option>
-            <option value="html">HTML</option>
-            <option value="url">URL (página web)</option>
-          </select>
-          <textarea id="content-body" placeholder="Conteúdo de texto/HTML ou URL"></textarea>
-          <button type="submit">Criar</button>
-        </form>
-      </div>
-
-      <div id="media-list" class="cards"></div>
-    </section>
-  </main>
-
-  <div id="toast" class="toast"></div>
-
+  <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
   <script src="app.js"></script>
 </body>
 </html>

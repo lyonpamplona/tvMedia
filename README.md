@@ -1,4 +1,4 @@
-# 📺 AdSignage — Sinalização digital autohospedada
+# 📺 tvMedia — Sinalização digital autohospedada
 
 Sistema completo para exibir propagandas em TVs de lojas e comércios. Edite o
 conteúdo no painel e ele aparece **na hora** nas telas, via WebSocket.
@@ -13,7 +13,7 @@ conteúdo no painel e ele aparece **na hora** nas telas, via WebSocket.
 ## Arquitetura
 
 ```
-adsignage/
+tvMedia/
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py            # versão do pacote

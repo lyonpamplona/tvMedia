@@ -40,7 +40,14 @@ async def notify_playlist_screens(
         reason: motivo da atualização.
     """
     slugs = db.scalars(
-        select(models.Screen.slug).where(models.Screen.playlist_id == playlist_id)
+        select(models.Screen.slug)
+        .join(models.Zone, models.Zone.screen_id == models.Screen.id)
+        .outerjoin(models.Schedule, models.Schedule.zone_id == models.Zone.id)
+        .where(
+            (models.Zone.default_playlist_id == playlist_id)
+            | (models.Schedule.playlist_id == playlist_id)
+        )
+        .distinct()
     )
     for slug in slugs:
         await manager.broadcast(slug, {"type": "reload", "reason": reason})
@@ -54,5 +61,27 @@ async def notify_all_screens(db: Session, *, reason: str) -> None:
         reason: motivo da atualização.
     """
     slugs = db.scalars(select(models.Screen.slug))
+    for slug in slugs:
+        await manager.broadcast(slug, {"type": "reload", "reason": reason})
+
+
+async def notify_sync_group(
+    db: Session, sync_group: str | None, *, reason: str
+) -> None:
+    """Notifica todas as telas de um mesmo grupo de sincronia.
+
+    Usado para manter um parque de TVs em sincronia: quando uma muda, todas
+    do grupo recarregam juntas.
+
+    Args:
+        db: sessão ativa.
+        sync_group: nome do grupo de sincronia (ignora se vazio).
+        reason: motivo da atualização.
+    """
+    if not sync_group:
+        return
+    slugs = db.scalars(
+        select(models.Screen.slug).where(models.Screen.sync_group == sync_group)
+    )
     for slug in slugs:
         await manager.broadcast(slug, {"type": "reload", "reason": reason})
