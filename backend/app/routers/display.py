@@ -5,104 +5,49 @@ Inclui:
 * ``GET /api/display/{slug}`` — monta o payload de exibição resolvendo, para
   cada zona, a playlist ativa no momento (considerando agendamentos e fuso da
   tela). Também registra um "heartbeat" (``last_seen``).
+* ``POST /api/display/{slug}/events`` — recebe lotes de eventos de reprodução
+  (proof-of-play) reportados pelo player.
 * ``WS /ws/display/{slug}`` — canal de tempo real; o servidor envia
   ``{"type": "reload"}`` quando o conteúdo da tela muda.
 
 Estes endpoints são públicos (sem autenticação): a TV só conhece o ``slug``.
+A montagem do payload foi extraída para :mod:`app.services`, de modo que a
+pré-visualização do painel use exatamente a mesma lógica do player.
 """
 
 from __future__ import annotations
 
-import hashlib
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from sqlalchemy.orm import Session
 
-from .. import crud, models, schemas
+from .. import crud, schemas, services
 from ..database import SessionLocal, get_db
-from ..embeds import build_embed_url
 from ..websocket_manager import manager
 
 router = APIRouter(tags=["display"])
 
 
-def _media_url(request: Request, media: models.Media) -> str | None:
-    """Resolve a URL pública de uma mídia conforme o tipo.
+@router.post("/api/display/pair", response_model=schemas.PairResponse)
+def pair_screen(data: schemas.PairRequest, db: Session = Depends(get_db)) -> schemas.PairResponse:
+    """Empareia uma TV a partir de um código numérico exibido na tela.
 
-    Args:
-        request: requisição atual (para montar URL absoluta de arquivos).
-        media: mídia a resolver.
+    Fluxo para parque grande de TVs: o painel mostra o código de cada tela; ao
+    digitá-lo no dispositivo, ele recebe o ``slug`` e passa a tocar o conteúdo.
 
-    Returns:
-        str | None: URL absoluta do arquivo/origem, ou None para texto/HTML.
+    Raises:
+        HTTPException: 404 quando o código não corresponde a nenhuma tela.
     """
-    if media.type in (models.MediaType.image, models.MediaType.video) and media.path:
-        return str(request.base_url) + f"media/{media.path}"
-    if media.type == models.MediaType.url:
-        return media.source_url
-    return None
-
-
-def _now_in_timezone(tz_name: str) -> datetime:
-    """Retorna o instante atual no fuso informado (com fallback para UTC)."""
-    try:
-        tz = ZoneInfo(tz_name)
-    except (ZoneInfoNotFoundError, ValueError):
-        tz = timezone.utc
-    return datetime.now(tz)
-
-
-def _build_zone_payload(
-    request: Request, db: Session, zone: models.Zone, now: datetime
-) -> schemas.DisplayZone:
-    """Monta o payload de uma zona resolvendo a playlist ativa no momento."""
-    playlist_id = crud.resolve_active_playlist_id(zone, now)
-    playlist = crud.get_playlist(db, playlist_id) if playlist_id else None
-
-    items: list[schemas.DisplayItem] = []
-    if playlist is not None:
-        for item in sorted(playlist.items, key=lambda i: i.position):
-            if item.media.type in (models.MediaType.youtube, models.MediaType.embed):
-                media_url = build_embed_url(item.media, muted=item.muted)
-            else:
-                media_url = _media_url(request, item.media)
-            items.append(
-                schemas.DisplayItem(
-                    type=item.media.type,
-                    duration=item.duration,
-                    name=item.media.name,
-                    fit=item.fit,
-                    transition=item.transition,
-                    muted=item.muted,
-                    url=media_url,
-                    content=item.media.content,
-                )
-            )
-
-    return schemas.DisplayZone(
-        id=zone.id,
-        name=zone.name,
-        x=zone.x,
-        y=zone.y,
-        width=zone.width,
-        height=zone.height,
-        z_index=zone.z_index,
-        playlist_name=playlist.name if playlist else None,
-        items=items,
-    )
-
-
-def _compute_revision(payload: schemas.DisplayPayload) -> str:
-    """Calcula um hash curto e estável do conteúdo (detecta mudanças).
-
-    O player compara a ``revision`` entre buscas para decidir se reinicia a
-    reprodução. Excluindo o próprio campo ``revision`` do cálculo.
-    """
-    snapshot = payload.model_dump(exclude={"revision"})
-    raw = repr(snapshot).encode()
-    return hashlib.sha256(raw).hexdigest()[:12]
+    screen = crud.get_screen_by_code(db, data.code.strip())
+    if screen is None:
+        raise HTTPException(status_code=404, detail="Código de emparelhamento inválido.")
+    return schemas.PairResponse(slug=screen.slug, name=screen.name)
 
 
 @router.get("/api/display/{slug}", response_model=schemas.DisplayPayload)
@@ -122,18 +67,36 @@ def get_display(
         raise HTTPException(status_code=404, detail="Tela não encontrada.")
 
     # Heartbeat: marca a tela como online.
-    screen.last_seen = datetime.now(timezone.utc)
-    db.commit()
+    crud.touch_screen_seen(db, screen)
 
-    now = _now_in_timezone(screen.timezone)
-    zones = [
-        _build_zone_payload(request, db, zone, now)
-        for zone in sorted(screen.zones, key=lambda z: z.z_index)
-    ]
+    return services.build_display_payload(str(request.base_url), db, screen)
 
-    payload = schemas.DisplayPayload(screen=screen.slug, revision="", zones=zones)
-    payload.revision = _compute_revision(payload)
-    return payload
+
+@router.post(
+    "/api/display/{slug}/events", response_model=dict, status_code=202
+)
+def report_events(
+    slug: str, batch: schemas.PlayEventBatch, db: Session = Depends(get_db)
+) -> dict:
+    """Recebe um lote de eventos de reprodução (proof-of-play) do player.
+
+    O player agrega os eventos em memória e os envia periodicamente para
+    reduzir o número de requisições. Endpoint público, idempotente o bastante
+    para a finalidade (apenas registra).
+
+    Raises:
+        HTTPException: 404 quando o ``slug`` não corresponde a uma tela.
+    """
+    screen = crud.get_screen_by_slug(db, slug)
+    if screen is None:
+        raise HTTPException(status_code=404, detail="Tela não encontrada.")
+    stored = crud.record_play_events(
+        db,
+        screen_slug=slug,
+        events=batch.events,
+        company_id=screen.company_id,
+    )
+    return {"stored": stored}
 
 
 @router.websocket("/ws/display/{slug}")
