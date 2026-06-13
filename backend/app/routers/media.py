@@ -19,6 +19,7 @@ from pathlib import Path
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -32,7 +33,8 @@ from sqlalchemy.orm import Session
 from .. import crud, models, schemas
 from ..auth import Scope, get_scope, require_auth, scope_can_access
 from ..config import settings
-from ..database import get_db
+from ..database import SessionLocal, get_db
+from .. import media_processing
 from ..realtime import notify_all_screens
 
 router = APIRouter(
@@ -58,6 +60,72 @@ def _validate_folder(db: Session, folder_id: int | None) -> None:
     """Garante que a pasta informada existe (quando informada)."""
     if folder_id is not None and crud.get_folder(db, folder_id) is None:
         raise HTTPException(status_code=400, detail="Pasta inexistente.")
+
+
+def _process_media_in_background(media_id: int) -> None:
+    """Processa (reescala/transcodifica) uma midia fora do ciclo da requisicao.
+
+    Abre uma sessao propria de banco (a sessao da requisicao ja foi fechada).
+    Nunca propaga excecoes: falhas viram status 'failed' na propria midia, para
+    nao derrubar o worker em segundo plano.
+    """
+    db = SessionLocal()
+    try:
+        media = crud.get_media(db, media_id)
+        if media is None or media.type not in (
+            models.MediaType.image,
+            models.MediaType.video,
+        ):
+            return
+        if not media.path:
+            crud.set_media_processing(db, media, status="skipped", note="Sem arquivo.")
+            return
+        crud.set_media_processing(db, media, status="processing")
+        result = media_processing.process_media_file(
+            settings.media_dir, media.path, media.type
+        )
+        crud.set_media_processing(
+            db,
+            media,
+            status=result.get("status", "done"),
+            note=result.get("note"),
+            width=result.get("width"),
+            height=result.get("height"),
+            optimized_path=result.get("optimized_path"),
+            poster_path=result.get("poster_path"),
+        )
+    except Exception as exc:  # pragma: no cover - defensivo
+        try:
+            media = crud.get_media(db, media_id)
+            if media is not None:
+                crud.set_media_processing(
+                    db, media, status="failed", note=str(exc)[:480]
+                )
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+async def _notify_media_processed() -> None:
+    """Avisa todas as telas para recarregarem apos o processamento concluir."""
+    db = SessionLocal()
+    try:
+        await notify_all_screens(db, reason="media-processed")
+    finally:
+        db.close()
+
+
+def _schedule_processing(
+    background_tasks: BackgroundTasks, media: models.Media
+) -> None:
+    """Agenda o processamento de uma midia de imagem/video, se habilitado."""
+    if not settings.media_processing_enabled:
+        return
+    if media.type not in (models.MediaType.image, models.MediaType.video):
+        return
+    background_tasks.add_task(_process_media_in_background, media.id)
+    background_tasks.add_task(_notify_media_processed)
 
 
 @router.get("", response_model=list[schemas.MediaRead])
@@ -181,10 +249,13 @@ async def bulk_create_media(
     "/upload", response_model=schemas.MediaRead, status_code=status.HTTP_201_CREATED
 )
 async def upload_media(
+    background_tasks: BackgroundTasks,
     name: str = Form(...),
     file: UploadFile = File(...),
     folder_id: int | None = Form(None),
     tags: str | None = Form(None),
+    width: int | None = Form(None),
+    height: int | None = Form(None),
     db: Session = Depends(get_db),
     scope: Scope = Depends(get_scope),
 ) -> models.Media:
@@ -261,7 +332,10 @@ async def upload_media(
         tags=tag_list,
         folder_id=folder_id,
         company_id=scope.write_company_id,
+        width=width,
+        height=height,
     )
+    _schedule_processing(background_tasks, media)
     await notify_all_screens(db, reason="media-uploaded")
     return media
 
@@ -269,6 +343,7 @@ async def upload_media(
 @router.post("/{media_id}/file", response_model=schemas.MediaRead)
 async def replace_media_file(
     media_id: int,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     scope: Scope = Depends(get_scope),
@@ -323,13 +398,52 @@ async def replace_media_file(
         await file.close()
 
     old_path = media.path
+    old_optimized = media.optimized_path
+    old_poster = media.poster_path
     media.path = unique_name
+    # Invalida derivados do arquivo anterior e reenfileira o processamento.
+    media.optimized_path = None
+    media.poster_path = None
+    media.width = None
+    media.height = None
+    media.processing_status = "pending"
+    media.processing_note = None
     db.add(media)
     db.commit()
     db.refresh(media)
     if old_path:
         (settings.media_dir / old_path).unlink(missing_ok=True)
+    if old_optimized:
+        (settings.media_dir / old_optimized).unlink(missing_ok=True)
+    if old_poster:
+        (settings.media_dir / old_poster).unlink(missing_ok=True)
+    _schedule_processing(background_tasks, media)
     await notify_all_screens(db, reason="media-file-replaced")
+    return media
+
+
+@router.post("/{media_id}/process", response_model=schemas.MediaRead)
+async def reprocess_media(
+    media_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> models.Media:
+    """Reenfileira o processamento (reescala/transcodificacao) de uma midia.
+
+    Util para gerar versoes otimizadas de midias antigas (enviadas antes do
+    recurso) ou apos instalar Pillow/ffmpeg no servidor.
+    """
+    media = crud.get_media(db, media_id)
+    if media is None or not scope_can_access(scope, media.company_id):
+        raise HTTPException(status_code=404, detail="Midia nao encontrada.")
+    if media.type not in (models.MediaType.image, models.MediaType.video):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Apenas imagens e videos podem ser processados.",
+        )
+    media = crud.set_media_processing(db, media, status="pending", note=None)
+    _schedule_processing(background_tasks, media)
     return media
 
 

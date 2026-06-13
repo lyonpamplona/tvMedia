@@ -68,6 +68,10 @@ def update_company(
         company.name = data.name
     if "primary_color" in data.model_fields_set:
         company.primary_color = data.primary_color
+    if "emergency_message" in data.model_fields_set:
+        company.emergency_message = data.emergency_message
+    if data.emergency_active is not None:
+        company.emergency_active = data.emergency_active
     if data.is_active is not None:
         company.is_active = data.is_active
     db.commit()
@@ -435,6 +439,9 @@ def create_media(
     tags: list[str] | None = None,
     folder_id: int | None = None,
     company_id: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    processing_status: str | None = None,
 ) -> models.Media:
     """Cria uma mídia.
 
@@ -450,6 +457,12 @@ def create_media(
     Returns:
         models.Media: a mídia criada.
     """
+    if processing_status is None:
+        processing_status = (
+            "pending"
+            if media_type in (models.MediaType.image, models.MediaType.video)
+            else "skipped"
+        )
     media = models.Media(
         name=name,
         type=media_type,
@@ -459,7 +472,42 @@ def create_media(
         tags=_tags_to_csv(tags),
         folder_id=folder_id,
         company_id=company_id,
+        width=width,
+        height=height,
+        processing_status=processing_status,
     )
+    db.add(media)
+    db.commit()
+    db.refresh(media)
+    return media
+
+
+def set_media_processing(
+    db: Session,
+    media: models.Media,
+    *,
+    status: str,
+    note: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    optimized_path: str | None = None,
+    poster_path: str | None = None,
+) -> models.Media:
+    """Atualiza os campos de processamento server-side de uma midia.
+
+    Apenas ``status`` e ``note`` sao sempre gravados; dimensoes e caminhos
+    derivados sao atualizados somente quando informados (nao-None).
+    """
+    media.processing_status = status
+    media.processing_note = note
+    if width is not None:
+        media.width = width
+    if height is not None:
+        media.height = height
+    if optimized_path is not None:
+        media.optimized_path = optimized_path
+    if poster_path is not None:
+        media.poster_path = poster_path
     db.add(media)
     db.commit()
     db.refresh(media)
@@ -576,6 +624,7 @@ def add_playlist_item(
         position=position,
         duration=data.duration,
         fit=data.fit,
+        focal=data.focal,
         transition=data.transition,
         muted=data.muted,
     )
@@ -594,6 +643,8 @@ def update_playlist_item(
         item.position = data.position
     if data.fit is not None:
         item.fit = data.fit
+    if data.focal is not None:
+        item.focal = data.focal
     if data.transition is not None:
         item.transition = data.transition
     if data.muted is not None:

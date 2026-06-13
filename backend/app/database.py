@@ -100,8 +100,10 @@ def _run_sqlite_migrations() -> None:
     additions = {
         "users": [("company_id", "INTEGER"), ("is_super_admin", "BOOLEAN NOT NULL DEFAULT 0")],
         "media_folders": [("company_id", "INTEGER")],
-        "media": [("company_id", "INTEGER")],
+        "media": [("company_id", "INTEGER"), ("width", "INTEGER"), ("height", "INTEGER"), ("optimized_path", "VARCHAR(512)"), ("poster_path", "VARCHAR(512)"), ("processing_status", "VARCHAR(16) NOT NULL DEFAULT 'pending'"), ("processing_note", "TEXT")],
         "playlists": [("company_id", "INTEGER")],
+        "playlist_items": [("focal", "VARCHAR(16) NOT NULL DEFAULT 'center'")],
+        "companies": [("emergency_message", "TEXT"), ("emergency_active", "BOOLEAN NOT NULL DEFAULT 0")],
         "screens": [("pair_code", "VARCHAR(12)"), ("sync_group", "VARCHAR(64)"), ("resolution", "VARCHAR(16)"), ("orientation", "VARCHAR(16) NOT NULL DEFAULT 'landscape'"), ("size_inches", "VARCHAR(8)")],
         "audit_logs": [("company_id", "INTEGER")],
         "play_events": [("company_id", "INTEGER")],
