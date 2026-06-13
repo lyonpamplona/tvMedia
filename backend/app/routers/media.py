@@ -1,12 +1,15 @@
 """Endpoints de gerenciamento de mídias.
 
-Suporta dois fluxos de criação:
+Fluxos de criação:
 
-* ``POST /api/media`` — cria mídia textual/HTML/URL (JSON).
-* ``POST /api/media/upload`` — envia arquivo (imagem/vídeo) via multipart.
+* ``POST /api/media`` — mídia textual/HTML/URL/embed/youtube (JSON).
+* ``POST /api/media/upload`` — arquivo (imagem/vídeo) via multipart, com
+  validação de extensão e de content-type e gravação em blocos.
+* ``POST /api/media/bulk`` — importação em massa de itens sem arquivo.
 
-Após qualquer alteração, todas as telas são notificadas para recarregar.
-Todas as rotas exigem autenticação (``require_auth`` no nível do roteador).
+Listagem com filtros opcionais (pasta, tag, busca) e paginação, mantendo
+compatibilidade: sem parâmetros, retorna a lista completa. Após alterações,
+todas as telas são notificadas. Todas as rotas exigem autenticação.
 """
 
 from __future__ import annotations
@@ -14,11 +17,20 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
-from ..auth import require_auth
+from ..auth import Scope, get_scope, require_auth, scope_can_access
 from ..config import settings
 from ..database import get_db
 from ..realtime import notify_all_screens
@@ -30,27 +42,139 @@ router = APIRouter(
 # Extensões aceitas por tipo de upload.
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
 _VIDEO_EXTS = {".mp4", ".webm", ".ogg", ".mov", ".mkv"}
+_AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".oga", ".wav", ".flac"}
+
+# Prefixos de content-type aceitos por tipo (defesa adicional além da extensão).
+_IMAGE_MIME_PREFIX = "image/"
+_VIDEO_MIME_PREFIX = "video/"
+_AUDIO_MIME_PREFIX = "audio/"
+
+# Tamanho do bloco de leitura/gravação no upload (1 MB), para uso de memória
+# praticamente constante mesmo com vídeos grandes (ex.: Raspberry Pi 4).
+_UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+def _validate_folder(db: Session, folder_id: int | None) -> None:
+    """Garante que a pasta informada existe (quando informada)."""
+    if folder_id is not None and crud.get_folder(db, folder_id) is None:
+        raise HTTPException(status_code=400, detail="Pasta inexistente.")
 
 
 @router.get("", response_model=list[schemas.MediaRead])
-def list_media(db: Session = Depends(get_db)) -> list[models.Media]:
-    """Lista todas as mídias cadastradas."""
-    return crud.list_media(db)
+def list_media(
+    folder_id: int | None = Query(None, description="Filtra por pasta (0 = sem pasta)."),
+    tag: str | None = Query(None, description="Filtra por tag."),
+    q: str | None = Query(None, description="Busca por nome."),
+    limit: int | None = Query(None, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> list[models.Media]:
+    """Lista mídias da empresa em foco. Sem filtros, retorna todas dela."""
+    if folder_id is None and tag is None and q is None and limit is None:
+        return crud.list_media(db, company_id=scope.company_id)
+    rows, _ = crud.list_media_paginated(
+        db,
+        limit=limit or 50,
+        offset=offset,
+        folder_id=folder_id,
+        tag=tag,
+        search=q,
+        company_id=scope.company_id,
+    )
+    return rows
+
+
+@router.get("/page", response_model=schemas.Page[schemas.MediaRead])
+def list_media_page(
+    folder_id: int | None = Query(None),
+    tag: str | None = Query(None),
+    q: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> schemas.Page[schemas.MediaRead]:
+    """Versão paginada da listagem (total + itens da página)."""
+    rows, total = crud.list_media_paginated(
+        db, limit=limit, offset=offset, folder_id=folder_id, tag=tag, search=q,
+        company_id=scope.company_id,
+    )
+    items = [schemas.MediaRead.model_validate(row) for row in rows]
+    return schemas.Page[schemas.MediaRead](
+        total=total, limit=limit, offset=offset, items=items
+    )
 
 
 @router.post("", response_model=schemas.MediaRead, status_code=status.HTTP_201_CREATED)
 async def create_media(
-    data: schemas.MediaCreate, db: Session = Depends(get_db)
+    data: schemas.MediaCreate,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ) -> models.Media:
-    """Cria uma mídia de texto, HTML ou URL (sem upload de arquivo)."""
-    if data.type in (models.MediaType.image, models.MediaType.video):
+    """Cria uma mídia sem upload (texto, HTML, URL, embed, youtube)."""
+    if data.type in (
+        models.MediaType.image,
+        models.MediaType.video,
+        models.MediaType.audio,
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Imagens e vídeos devem ser enviados via /api/media/upload.",
+            detail="Imagens, vídeos e áudios devem ser enviados via /api/media/upload.",
         )
-    media = crud.create_media(db, data)
+    _validate_folder(db, data.folder_id)
+    media = crud.create_media(
+        db,
+        name=data.name,
+        media_type=data.type,
+        source_url=data.source_url,
+        content=data.content,
+        tags=data.tags,
+        folder_id=data.folder_id,
+        company_id=scope.write_company_id,
+    )
     await notify_all_screens(db, reason="media-created")
     return media
+
+
+@router.post("/bulk", response_model=list[schemas.MediaRead], status_code=201)
+async def bulk_create_media(
+    data: schemas.BulkUrlRequest,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> list[models.Media]:
+    """Importa várias mídias sem arquivo de uma só vez.
+
+    Útil para cadastrar listas de URLs/embeds (ex.: vários vídeos do YouTube).
+    Itens de imagem/vídeo (que exigem arquivo) são rejeitados.
+    """
+    created: list[models.Media] = []
+    for item in data.items:
+        if item.type in (
+            models.MediaType.image,
+            models.MediaType.video,
+            models.MediaType.audio,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Importação em massa não aceita imagens/vídeos/áudios.",
+            )
+        _validate_folder(db, item.folder_id)
+        created.append(
+            crud.create_media(
+                db,
+                name=item.name,
+                media_type=item.type,
+                source_url=item.source_url,
+                content=item.content,
+                tags=item.tags,
+                folder_id=item.folder_id,
+                company_id=scope.write_company_id,
+            )
+        )
+    if created:
+        await notify_all_screens(db, reason="media-bulk-created")
+    return created
 
 
 @router.post(
@@ -59,61 +183,185 @@ async def create_media(
 async def upload_media(
     name: str = Form(...),
     file: UploadFile = File(...),
+    folder_id: int | None = Form(None),
+    tags: str | None = Form(None),
     db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ) -> models.Media:
-    """Recebe um arquivo (imagem/vídeo), salva em disco e registra a mídia.
+    """Recebe um arquivo (imagem/vídeo), valida, salva e registra a mídia.
 
-    O arquivo é gravado com um nome único (UUID + extensão original) dentro do
-    diretório de mídia configurado, e fica acessível publicamente em ``/media``.
+    Valida tanto a extensão quanto o content-type informado pelo cliente, e
+    grava em blocos para manter o uso de memória baixo.
 
     Raises:
-        HTTPException: extensão não suportada ou arquivo acima do limite.
+        HTTPException: extensão/tipo não suportados ou arquivo acima do limite.
     """
     suffix = Path(file.filename or "").suffix.lower()
+    content_type = (file.content_type or "").lower()
     if suffix in _IMAGE_EXTS:
         media_type = models.MediaType.image
+        if content_type and not content_type.startswith(_IMAGE_MIME_PREFIX):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="O conteúdo enviado não parece ser uma imagem.",
+            )
     elif suffix in _VIDEO_EXTS:
         media_type = models.MediaType.video
+        if content_type and not content_type.startswith(_VIDEO_MIME_PREFIX):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="O conteúdo enviado não parece ser um vídeo.",
+            )
+    elif suffix in _AUDIO_EXTS:
+        media_type = models.MediaType.audio
+        if content_type and not content_type.startswith(_AUDIO_MIME_PREFIX):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="O conteúdo enviado não parece ser um áudio.",
+            )
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Extensão não suportada: {suffix or '(desconhecida)'}",
         )
 
-    payload = await file.read()
-    if len(payload) > settings.max_upload_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Arquivo excede o limite de {settings.max_upload_mb} MB.",
-        )
+    _validate_folder(db, folder_id)
 
     unique_name = f"{uuid.uuid4().hex}{suffix}"
     destination = settings.media_dir / unique_name
-    destination.write_bytes(payload)
+    max_bytes = settings.max_upload_bytes
+    written = 0
+    try:
+        with destination.open("wb") as buffer:
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"Arquivo excede o limite de {settings.max_upload_mb} MB.",
+                    )
+                buffer.write(chunk)
+    except HTTPException:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
 
-    media = crud.create_uploaded_media(db, name, media_type, unique_name)
+    tag_list = (
+        [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+    )
+    media = crud.create_media(
+        db,
+        name=name,
+        media_type=media_type,
+        path=unique_name,
+        tags=tag_list,
+        folder_id=folder_id,
+        company_id=scope.write_company_id,
+    )
     await notify_all_screens(db, reason="media-uploaded")
+    return media
+
+
+@router.post("/{media_id}/file", response_model=schemas.MediaRead)
+async def replace_media_file(
+    media_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> models.Media:
+    """Substitui o arquivo de uma mídia de imagem/vídeo existente.
+
+    Mantém o registro (id, nome, pasta, tags) e troca apenas o arquivo,
+    apagando o antigo após gravar o novo. Valida extensão e content-type.
+    """
+    media = crud.get_media(db, media_id)
+    if media is None or not scope_can_access(scope, media.company_id):
+        raise HTTPException(status_code=404, detail="Mídia não encontrada.")
+    if media.type not in (models.MediaType.image, models.MediaType.video):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Apenas mídias de imagem/vídeo possuem arquivo.",
+        )
+    suffix = Path(file.filename or "").suffix.lower()
+    content_type = (file.content_type or "").lower()
+    if media.type == models.MediaType.image:
+        if suffix not in _IMAGE_EXTS:
+            raise HTTPException(status_code=400, detail=f"Extensão não suportada: {suffix or '(desconhecida)'}")
+        if content_type and not content_type.startswith(_IMAGE_MIME_PREFIX):
+            raise HTTPException(status_code=400, detail="O conteúdo enviado não parece ser uma imagem.")
+    else:
+        if suffix not in _VIDEO_EXTS:
+            raise HTTPException(status_code=400, detail=f"Extensão não suportada: {suffix or '(desconhecida)'}")
+        if content_type and not content_type.startswith(_VIDEO_MIME_PREFIX):
+            raise HTTPException(status_code=400, detail="O conteúdo enviado não parece ser um vídeo.")
+
+    unique_name = f"{uuid.uuid4().hex}{suffix}"
+    destination = settings.media_dir / unique_name
+    max_bytes = settings.max_upload_bytes
+    written = 0
+    try:
+        with destination.open("wb") as buffer:
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"Arquivo excede o limite de {settings.max_upload_mb} MB.",
+                    )
+                buffer.write(chunk)
+    except HTTPException:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+
+    old_path = media.path
+    media.path = unique_name
+    db.add(media)
+    db.commit()
+    db.refresh(media)
+    if old_path:
+        (settings.media_dir / old_path).unlink(missing_ok=True)
+    await notify_all_screens(db, reason="media-file-replaced")
     return media
 
 
 @router.patch("/{media_id}", response_model=schemas.MediaRead)
 async def update_media(
-    media_id: int, data: schemas.MediaUpdate, db: Session = Depends(get_db)
+    media_id: int,
+    data: schemas.MediaUpdate,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ) -> models.Media:
     """Atualiza parcialmente uma mídia existente."""
     media = crud.get_media(db, media_id)
-    if media is None:
+    if media is None or not scope_can_access(scope, media.company_id):
         raise HTTPException(status_code=404, detail="Mídia não encontrada.")
+    if "folder_id" in data.model_fields_set:
+        _validate_folder(db, data.folder_id)
     media = crud.update_media(db, media, data)
     await notify_all_screens(db, reason="media-updated")
     return media
 
 
-@router.delete("/{media_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_media(media_id: int, db: Session = Depends(get_db)) -> None:
+@router.delete(
+    "/{media_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None
+)
+async def delete_media(
+    media_id: int,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> None:
     """Remove uma mídia e o arquivo associado (se houver)."""
     media = crud.get_media(db, media_id)
-    if media is None:
+    if media is None or not scope_can_access(scope, media.company_id):
         raise HTTPException(status_code=404, detail="Mídia não encontrada.")
 
     if media.path:
