@@ -176,6 +176,134 @@
    * @param {() => void} onVideoEnded Callback chamado quando um vídeo termina.
    * @returns {HTMLElement} Elemento pronto para inserção na camada.
    */
+  // ---- v18: widgets dinamicos (relogio, clima, tickers) ---- //
+
+  /** Faz o parse seguro da config JSON de um widget (campo content). */
+  function parseConfig(item) {
+    try { return item && item.content ? JSON.parse(item.content) : {}; }
+    catch (e) { return {}; }
+  }
+
+  /** Escapa texto para insercao segura como HTML. */
+  function escapeText(s) {
+    const d = document.createElement("div");
+    d.textContent = s == null ? "" : String(s);
+    return d.innerHTML;
+  }
+
+  /** Executa fn imediatamente e a cada ms, enquanto o elemento estiver no DOM. */
+  function keepWhileConnected(el, fn, ms) {
+    const id = setInterval(() => { if (!el.isConnected) { clearInterval(id); return; } fn(); }, ms);
+    fn();
+    return id;
+  }
+
+  const WEATHER_CODES = { 0: "Ceu limpo", 1: "Predom. limpo", 2: "Parc. nublado", 3: "Nublado", 45: "Nevoa", 48: "Nevoa", 51: "Garoa", 53: "Garoa", 55: "Garoa", 61: "Chuva fraca", 63: "Chuva", 65: "Chuva forte", 66: "Chuva gelada", 67: "Chuva gelada", 71: "Neve", 73: "Neve", 75: "Neve forte", 77: "Neve", 80: "Pancadas", 81: "Pancadas", 82: "Pancadas fortes", 85: "Neve", 86: "Neve", 95: "Tempestade", 96: "Tempestade", 99: "Tempestade" };
+  function weatherIcon(code) {
+    if (code === 0) return "\u2600\uFE0F";
+    if (code <= 2) return "\uD83C\uDF24\uFE0F";
+    if (code === 3) return "\u2601\uFE0F";
+    if (code <= 48) return "\uD83C\uDF2B\uFE0F";
+    if (code <= 67) return "\uD83C\uDF27\uFE0F";
+    if (code <= 77) return "\u2744\uFE0F";
+    if (code <= 86) return "\uD83C\uDF26\uFE0F";
+    return "\u26C8\uFE0F";
+  }
+
+  function buildClockWidget(cfg) {
+    const wrap = document.createElement("div");
+    wrap.className = "widget widget-clock";
+    const title = cfg.title ? '<div class="w-title">' + escapeText(cfg.title) + '</div>' : "";
+    wrap.innerHTML = title + '<div class="w-time"></div><div class="w-date"></div>';
+    const t = wrap.querySelector(".w-time");
+    const d = wrap.querySelector(".w-date");
+    const use12 = cfg.format === "12h";
+    keepWhileConnected(wrap, () => {
+      const now = new Date();
+      let h = now.getHours();
+      const m = String(now.getMinutes()).padStart(2, "0");
+      const s = String(now.getSeconds()).padStart(2, "0");
+      let suffix = "";
+      if (use12) { suffix = h >= 12 ? " PM" : " AM"; h = h % 12 || 12; }
+      t.textContent = String(h).padStart(2, "0") + ":" + m + ":" + s + suffix;
+      if (cfg.showDate !== false) { d.textContent = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }); }
+    }, 1000);
+    return wrap;
+  }
+
+  function buildWeatherWidget(cfg) {
+    const wrap = document.createElement("div");
+    wrap.className = "widget widget-weather";
+    const city = cfg.city || "Sao Paulo";
+    wrap.innerHTML = '<div class="w-title">' + escapeText(cfg.title || city) + '</div><div class="w-wx"><div class="w-ico">\u2026</div><div class="w-temp">--\u00b0</div></div><div class="w-cond">Carregando\u2026</div>';
+    const load = async () => {
+      try {
+        let lat = cfg.lat, lon = cfg.lon;
+        if (lat == null || lon == null) {
+          const g = await fetch("https://geocoding-api.open-meteo.com/v1/search?count=1&language=pt&name=" + encodeURIComponent(city)).then((r) => r.json());
+          if (g && g.results && g.results[0]) { lat = g.results[0].latitude; lon = g.results[0].longitude; }
+        }
+        if (lat == null) { wrap.querySelector(".w-cond").textContent = "Cidade nao encontrada"; return; }
+        const w = await fetch("https://api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code&timezone=auto&latitude=" + lat + "&longitude=" + lon).then((r) => r.json());
+        const cur = w && w.current ? w.current : null;
+        if (!cur) return;
+        wrap.querySelector(".w-ico").textContent = weatherIcon(cur.weather_code);
+        wrap.querySelector(".w-temp").textContent = Math.round(cur.temperature_2m) + "\u00b0";
+        wrap.querySelector(".w-cond").textContent = WEATHER_CODES[cur.weather_code] || "";
+      } catch (e) { wrap.querySelector(".w-cond").textContent = "Clima indisponivel"; }
+    };
+    keepWhileConnected(wrap, load, 600000);
+    return wrap;
+  }
+
+  function buildTickerEl(label, cfg) {
+    const wrap = document.createElement("div");
+    wrap.className = "widget widget-ticker";
+    const speed = Math.max(20, Number(cfg.speed) || 60);
+    wrap.innerHTML = (label ? '<div class="t-label">' + escapeText(label) + '</div>' : "") + '<div class="t-track"><div class="t-move"></div></div>';
+    const move = wrap.querySelector(".t-move");
+    const render = (list) => {
+      const text = (list || []).filter(Boolean);
+      if (!text.length) { move.innerHTML = '<span class="t-item">Sem itens para exibir.</span>'; return; }
+      const html = text.map((s) => '<span class="t-item">' + s + '</span>').join('<span class="t-sep">\u2022</span>');
+      move.innerHTML = html + '<span class="t-sep">\u2022</span>' + html;
+      move.style.animationDuration = speed + "s";
+    };
+    return { wrap: wrap, render: render };
+  }
+
+  function buildNewsTicker(cfg) {
+    const manual = Array.isArray(cfg.messages) ? cfg.messages.map(escapeText) : [];
+    const built = buildTickerEl(cfg.title || "Noticias", cfg);
+    built.render(manual);
+    const feeds = Array.isArray(cfg.feeds) ? cfg.feeds.filter(Boolean) : [];
+    if (feeds.length) {
+      const load = async () => {
+        try {
+          const res = await fetch("/api/widgets/news?limit=25&feeds=" + encodeURIComponent(feeds.join(","))).then((r) => r.json());
+          const heads = (res && res.items ? res.items : []).map((it) => escapeText(it.title) + (it.source ? ' <em>(' + escapeText(it.source) + ')</em>' : ''));
+          built.render(manual.concat(heads));
+        } catch (e) { /* mantem mensagens manuais */ }
+      };
+      keepWhileConnected(built.wrap, load, 300000);
+    }
+    return built.wrap;
+  }
+
+  function buildPromoTicker(cfg) {
+    const products = Array.isArray(cfg.products) ? cfg.products : [];
+    const items = products.map((p) => {
+      const name = escapeText(p.name || "");
+      const price = (p.price != null && p.price !== "") ? ' <b>' + escapeText(p.price) + '</b>' : '';
+      const note = p.note ? ' <em>' + escapeText(p.note) + '</em>' : '';
+      return name + price + note;
+    });
+    const built = buildTickerEl(cfg.title || "Promocoes", cfg);
+    built.wrap.classList.add("widget-promo");
+    built.render(items);
+    return built.wrap;
+  }
+
   function createMediaElement(item, onVideoEnded) {
     switch (item.type) {
       case "image": {
@@ -207,6 +335,14 @@
         iframe.allowFullscreen = true;
         return iframe;
       }
+      case "clock":
+        return buildClockWidget(parseConfig(item));
+      case "weather":
+        return buildWeatherWidget(parseConfig(item));
+      case "news":
+        return buildNewsTicker(parseConfig(item));
+      case "promo":
+        return buildPromoTicker(parseConfig(item));
       case "html": {
         const div = document.createElement("div");
         div.className = "text-slide";
@@ -300,7 +436,7 @@
       }
 
       // Vídeos avançam no evento `ended`; demais usam timer por duração.
-      if (item.type !== "video") {
+      if (item.type !== "video" && items.length > 1) {
         const ms = Math.max(1, item.duration || 10) * 1000;
         this.timer = setTimeout(advance, ms);
       }

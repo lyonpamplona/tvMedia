@@ -57,8 +57,9 @@
     tag: S('<path d="M3 3h8l10 10-8 8L3 11z"/><circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" stroke="none"/>'),
   };
 
-  const TYPE_ICON = { image: "image", video: "video", text: "text", html: "code", url: "link", youtube: "youtube", embed: "music", audio: "music" };
-  const TYPE_LABEL = { image: "Imagem", video: "Video", text: "Texto", html: "HTML", url: "URL", youtube: "YouTube", embed: "Embed", audio: "Audio" };
+  const TYPE_ICON = { image: "image", video: "video", text: "text", html: "code", url: "link", youtube: "youtube", embed: "music", audio: "music", clock: "clock", weather: "sun", news: "text", promo: "tag" };
+  const TYPE_LABEL = { image: "Imagem", video: "Video", text: "Texto", html: "HTML", url: "URL", youtube: "YouTube", embed: "Embed", audio: "Audio", clock: "Relogio", weather: "Clima", news: "Noticias", promo: "Promocoes" };
+  const WIDGET_TYPES = ["clock", "weather", "news", "promo"];
   // Modelos prontos de conteudo para acelerar a criacao de textos/cartazes.
   const MEDIA_TEMPLATES = {
     promo: { label: "Promocao", text: "OFERTA ESPECIAL\n50% OFF\nSomente hoje. Aproveite!", html: '<div style="text-align:center;color:#fff;font-family:system-ui"><div style="font-size:3vmin;letter-spacing:.3em;color:#7aa2f7">OFERTA ESPECIAL</div><div style="font-size:12vmin;font-weight:800;line-height:1">50% OFF</div><div style="font-size:3.5vmin;margin-top:2vmin">Somente hoje. Aproveite!</div></div>' },
@@ -571,9 +572,10 @@
       '<div class="field"><label>Link do player (TV)</label><div class="code">' + esc(playerUrl(sc.slug)) + '</div></div>' +
       '<button class="btn ghost block small" data-copy-link>' + ICONS.copy + ' Copiar link</button>' +
       '<button class="btn ghost block small" style="margin-top:8px" data-preview-screen>' + ICONS.eye + ' Pre-visualizar player</button>' +
-      '<button class="btn ghost block small" style="margin-top:8px" data-live-preview>' + ICONS.eye + ' Pre-visualizar ao vivo (no painel)</button></div>' +
+      '<button class="btn ghost block small" style="margin-top:8px" data-live-preview>' + ICONS.eye + ' Pre-visualizar ao vivo (no painel)</button>' +
+      '<button class="btn ghost block small" style="margin-top:8px" data-kiosk>' + ICONS.screen + ' Modo quiosque (QR code)</button></div>' +
       '<div class="insp-section"><h5>Musica de fundo (tela)</h5>' + screenMusicField(sc) + '</div>' +
-      '<div class="insp-section"><button class="btn block" data-add-zone>' + ICONS.plus + ' Adicionar zona</button><button class="btn danger block small" style="margin-top:8px" data-del-screen>' + ICONS.trash + ' Excluir tela</button></div>';
+      '<div class="insp-section"><button class="btn block" data-add-zone>' + ICONS.plus + ' Adicionar zona</button><button class="btn block small" style="margin-top:8px" data-dup-screen>' + ICONS.copy + ' Duplicar tela</button><button class="btn danger block small" style="margin-top:8px" data-del-screen>' + ICONS.trash + ' Excluir tela</button></div>';
   }
 
   function field(label, inner) { return '<div class="field"><label>' + label + '</label>' + inner + '</div>'; }
@@ -613,6 +615,8 @@
       const cl = insp.querySelector("[data-copy-link]"); if (cl) cl.addEventListener("click", () => copyText(playerUrl(sc.slug)));
       const pv = insp.querySelector("[data-preview-screen]"); if (pv) pv.addEventListener("click", () => window.open(playerUrl(sc.slug), "_blank"));
       const lp = insp.querySelector("[data-live-preview]"); if (lp) lp.addEventListener("click", () => openLivePreview(sc));
+      const kq = insp.querySelector("[data-kiosk]"); if (kq) kq.addEventListener("click", () => openKioskMode(sc));
+      const dsc = insp.querySelector("[data-dup-screen]"); if (dsc) dsc.addEventListener("click", () => duplicateScreen(sc));
       const bg = $("f-bgaudio"); if (bg) bg.addEventListener("change", () => setScreenMusic(bg.value ? Number(bg.value) : null));
       const um = insp.querySelector("[data-upload-music]"); if (um) um.addEventListener("click", uploadScreenMusic);
       const az = insp.querySelector("[data-add-zone]"); if (az) az.addEventListener("click", async () => { try { await api("/api/screens/" + sc.id + "/zones", { method: "POST", body: JSON.stringify({ name: "Nova zona", x: 10, y: 10, width: 40, height: 40, z_index: sc.zones.length + 1 }) }); await loadScreens(); const s = screen(); state.selectedZoneId = s.zones[s.zones.length - 1].id; renderAll(); toast({ kind: "ok", msg: "Zona adicionada." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
@@ -744,7 +748,7 @@
     const z = sc ? sc.zones.find((x) => x.id === zoneId) : null;
     if (!z) { toast({ kind: "warn", msg: "Selecione uma zona primeiro." }); return; }
     if (kind === "music") { chooseScreenMusic(); return; }
-    const titles = { text: "Criar texto", image: "Anexar foto", video: "Anexar video", url: "Adicionar link / YouTube", "text-music": "Texto com musica de fundo" };
+    const titles = { text: "Criar texto", image: "Anexar foto", video: "Anexar video", url: "Adicionar link / YouTube", "text-music": "Texto com musica de fundo", clock: "Adicionar relogio", weather: "Adicionar clima", news: "Adicionar ticker de noticias", promo: "Adicionar ticker de promocoes" };
     const lock = (kind !== "url");
     const presetType = (kind === "text-music") ? "text" : (kind === "url" ? "youtube" : kind);
     openMediaModal({ presetType: presetType, lockType: lock, title: titles[kind] || "Adicionar conteudo", onCreated: async (media) => {
@@ -767,6 +771,10 @@
       { k: "url", ic: "link", lb: "Adicionar link / YouTube" },
       { k: "text-music", ic: "music", lb: "Texto com musica de fundo" },
       { k: "music", ic: "music", lb: "Musica de fundo (tela)" },
+      { k: "clock", ic: "clock", lb: "Relogio / data" },
+      { k: "weather", ic: "sun", lb: "Clima (tempo)" },
+      { k: "news", ic: "text", lb: "Ticker de noticias" },
+      { k: "promo", ic: "tag", lb: "Ticker de promocoes" },
     ];
     const menu = document.createElement("div");
     menu.className = "ctx-menu";
@@ -832,6 +840,49 @@
   }
 
   /** Assistente de nova tela: nome, fuso e layout inicial (1, 2 ou 3 zonas). */
+  async function duplicateScreen(sc) {
+    const input = await promptDialog({ title: "Duplicar tela", message: "Nome da nova tela:", icon: "copy", placeholder: sc.name + " (copia)", confirmText: "Duplicar" });
+    if (input === null || input === undefined) return;
+    const name = (input || "").trim() || (sc.name + " (copia)");
+    try {
+      const created = await api("/api/screens", { method: "POST", body: JSON.stringify({ name: name, timezone: sc.timezone }) });
+      await loadScreens();
+      const fresh = state.screens.find((s) => s.id === created.id);
+      const mainZone = fresh && fresh.zones[0] ? fresh.zones[0] : null;
+      const src = sc.zones.slice().sort((a, b) => a.z_index - b.z_index);
+      for (let i = 0; i < src.length; i++) {
+        const z = src[i];
+        const payload = { name: z.name, x: z.x, y: z.y, width: z.width, height: z.height, z_index: z.z_index, default_playlist_id: z.default_playlist_id };
+        if (i === 0 && mainZone) { await api("/api/screens/" + created.id + "/zones/" + mainZone.id, { method: "PATCH", body: JSON.stringify(payload) }); }
+        else { await api("/api/screens/" + created.id + "/zones", { method: "POST", body: JSON.stringify(payload) }); }
+      }
+      if (sc.background_audio_id) { await api("/api/screens/" + created.id, { method: "PATCH", body: JSON.stringify({ background_audio_id: sc.background_audio_id }) }); }
+      await loadScreens(); state.activeSection = "screens"; state.activeScreenId = created.id;
+      const s = screen(); state.selectedZoneId = s && s.zones[0] ? s.zones[0].id : null;
+      renderActivity(); renderAll();
+      toast({ kind: "ok", msg: "Tela duplicada com " + src.length + " zona(s)." });
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+
+  function openKioskMode(sc) {
+    const url = playerUrl(sc.slug);
+    const qr = "https://api.qrserver.com/v1/create-qr-code/?size=320x320&margin=10&data=" + encodeURIComponent(url);
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.screen + '</span><span class="modal-title">Modo quiosque - ' + esc(sc.name) + '</span></div>' +
+      '<div class="modal-body" style="text-align:center">' +
+        '<p class="hint">Abra este endereco no navegador da TV (tela cheia) ou aponte a camera do celular para o QR code.</p>' +
+        '<div class="qr-box"><img alt="QR code do player" src="' + qr + '"/></div>' +
+        '<div class="field"><label>Link do player (TV)</label><div class="code">' + esc(url) + '</div></div>' +
+        '<p class="hint">Dica: ative tela cheia (F11) e desative a suspensao de tela para exibicao continua.</p>' +
+      '</div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button><button class="btn ghost" data-copy>' + ICONS.copy + ' Copiar link</button><button class="btn primary" data-open>' + ICONS.eye + ' Abrir player</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    modal.querySelector("[data-copy]").addEventListener("click", () => copyText(url));
+    modal.querySelector("[data-open]").addEventListener("click", () => window.open(url, "_blank"));
+  }
+
   function openScreenWizard() {
     let chosen = "full";
     const modal = document.createElement("div");
@@ -871,6 +922,24 @@
         toast({ kind: "ok", msg: "Tela criada com " + layout.length + " zona(s)." });
       } catch (err) { toast({ kind: "err", msg: err.message }); }
     });
+  }
+
+  // ---- v18: formularios e leitura de config dos widgets dinamicos ---- //
+  function widgetFormHtml(t) {
+    if (t === "clock") return '<div class="field"><label>3. Titulo (opcional)</label><input id="wf-title" placeholder="Ex.: Agora"/></div><div class="row" style="gap:10px"><div class="field grow"><label>Formato</label><select id="wf-format"><option value="24h">24 horas</option><option value="12h">12 horas (AM/PM)</option></select></div><div class="field grow"><label>Mostrar data</label><select id="wf-showdate"><option value="1">Sim</option><option value="0">Nao</option></select></div></div><span class="hint">Relogio atualizado em tempo real no fuso da TV.</span>';
+    if (t === "weather") return '<div class="field"><label>3. Cidade</label><input id="wf-city" placeholder="Ex.: Sao Paulo"/></div><div class="field"><label>Titulo (opcional)</label><input id="wf-title" placeholder="Padrao: nome da cidade"/></div><span class="hint">Dados automaticos via open-meteo (sem chave). Atualiza a cada 10 min.</span>';
+    if (t === "news") return '<div class="field"><label>3. Feeds RSS (um por linha)</label><textarea id="wf-feeds" rows="3" placeholder="https://g1.globo.com/rss/g1/"></textarea></div><div class="field"><label>Mensagens manuais (uma por linha, opcional)</label><textarea id="wf-messages" rows="3" placeholder="Bem-vindo!"></textarea></div><div class="row" style="gap:10px"><div class="field grow"><label>Titulo</label><input id="wf-title" placeholder="Noticias"/></div><div class="field grow"><label>Velocidade (s)</label><input id="wf-speed" type="number" value="60"/></div></div><span class="hint">As manchetes dos feeds sao buscadas pelo servidor e combinadas com suas mensagens.</span>';
+    return '<div class="field"><label>3. Produtos (um por linha: Nome | preco | obs)</label><textarea id="wf-products" rows="5" placeholder="Pizza grande | R$ 49,90 | ate sexta"></textarea></div><div class="row" style="gap:10px"><div class="field grow"><label>Titulo</label><input id="wf-title" placeholder="Promocoes"/></div><div class="field grow"><label>Velocidade (s)</label><input id="wf-speed" type="number" value="50"/></div></div><span class="hint">Faixa deslizante (vermelha), ideal no rodape da zona.</span>';
+  }
+  function collectWidgetConfig(t, modal) {
+    const val = (id) => { const e = modal.querySelector(id); return e ? e.value : ""; };
+    const lines = (id) => (val(id) || "").split("\n").map((s) => s.trim()).filter(Boolean);
+    const title = (val("#wf-title") || "").trim();
+    if (t === "clock") return { title: title, format: val("#wf-format") || "24h", showDate: val("#wf-showdate") !== "0" };
+    if (t === "weather") return { title: title, city: (val("#wf-city") || "").trim() || "Sao Paulo" };
+    if (t === "news") return { title: title || "Noticias", feeds: lines("#wf-feeds"), messages: lines("#wf-messages"), speed: Number(val("#wf-speed")) || 60 };
+    const products = lines("#wf-products").map((line) => { const p = line.split("|").map((s) => s.trim()); return { name: p[0] || "", price: p[1] || "", note: p[2] || "" }; });
+    return { title: title || "Promocoes", products: products, speed: Number(val("#wf-speed")) || 50 };
   }
 
   function openMediaModal(opts) {
@@ -914,6 +983,8 @@
           const nm = modal.querySelector("#mm-name");
           if (nm && !nm.value.trim()) nm.value = tpl.label;
         }));
+      } else if (WIDGET_TYPES.indexOf(current) !== -1) {
+        dyn.innerHTML = widgetFormHtml(current);
       } else {
         const ph = current === "youtube" ? "https://youtube.com/watch?v=..." : (current === "embed" ? "https://... (pagina ou musica para incorporar)" : "https://exemplo.com");
         const help = current === "youtube" ? "Cole o link do video do YouTube." : (current === "embed" ? "Pagina ou conteudo incorporavel." : "Pagina web que sera exibida.");
@@ -938,6 +1009,10 @@
           if (folderId) fd.append("folder_id", folderId);
           if (tags.trim()) fd.append("tags", tags);
           created = await api("/api/media/upload", { method: "POST", body: fd });
+        } else if (WIDGET_TYPES.indexOf(current) !== -1) {
+          const body = { name, type: current, content: JSON.stringify(collectWidgetConfig(current, modal)), tags: tags.split(",").map((s) => s.trim()).filter(Boolean) };
+          if (folderId) body.folder_id = Number(folderId);
+          created = await api("/api/media", { method: "POST", body: JSON.stringify(body) });
         } else {
           const value = modal.querySelector("#mm-value").value;
           const body = { name, type: current, tags: tags.split(",").map((s) => s.trim()).filter(Boolean) };
@@ -1242,6 +1317,7 @@
     { icon: "playlist", title: "3. Playlists", text: "Uma playlist e a sequencia de midias que toca em loop. Defina a duracao de cada item, o efeito de transicao, o modo de ajuste (cobrir ou conter) e o audio. Depois ligue a playlist a uma zona da tela." },
     { icon: "clock", title: "4. Agendamentos", text: "Quer conteudos diferentes por horario ou dia da semana? Em Agendamentos voce define quando cada playlist toca em cada zona. Sem agendamento, a playlist padrao da zona e usada o tempo todo." },
     { icon: "eye", title: "5. Publicar na TV", text: "Abra a tela, copie o link do player e abra esse link no navegador da TV (ou use o botao Pre-visualizar). As mudancas feitas aqui aparecem na TV ao vivo, sem precisar recarregar a pagina." },
+    { icon: "sun", title: "6. Widgets e tickers", text: "Alem de imagens e videos, adicione widgets: relogio, clima (automatico pela cidade), ticker de noticias (RSS + mensagens) e ticker de promocoes. Clique com o botao direito numa zona e escolha o widget, ou use Nova midia." },
     { icon: "search", title: "Dica final", text: "Pressione Ctrl+K a qualquer momento para abrir a paleta de comandos e ir direto a qualquer acao. Para rever este guia depois, procure por 'Abrir guia de uso' na paleta. Bom trabalho!" },
   ];
   let tourIndex = 0;
