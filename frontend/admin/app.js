@@ -53,6 +53,7 @@
     upload: S('<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>'),
     folder: S('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
     user: S('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'),
+    shield: S('<path d="M12 3 4 6v6c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V6z"/>'),
     lock: S('<rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
     tag: S('<path d="M3 3h8l10 10-8 8L3 11z"/><circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" stroke="none"/>'),
   };
@@ -163,6 +164,7 @@
 
   // ----- Multi-empresa (multi-tenant): branding, empresas e templates ----- //
   async function loadBranding() { return api("/api/branding"); }
+  async function loadMe() { return api("/api/auth/me"); }
   async function loadTemplates() { try { return await api("/api/templates"); } catch (e) { return []; } }
   async function loadCompanies() { return api("/api/companies"); }
   async function createCompany(data) { return api("/api/companies", { method: "POST", body: JSON.stringify(data) }); }
@@ -333,14 +335,14 @@
     bar.innerHTML = SECTIONS.map((s) => '<button class="act ' + (s.id === state.activeSection ? "active" : "") + '" data-sec="' + s.id + '" title="' + s.label + '">' + ICONS[s.icon] + '</button>').join("") +
       '<div class="spacer"></div>' +
       '<button class="act" data-act="health" title="Painel de saude das telas">' + ICONS.wifi + '</button>' +
-      (state.user && state.user.is_super_admin ? '<button class="act" data-act="companies" title="Empresas (super admin)">' + ICONS.folder + '</button>' : '') +
+      (state.user && state.user.is_super_admin ? '<button class="act" data-act="companies" title="Console do super admin">' + ICONS.shield + '</button>' : '') +
       '<button class="act" data-act="theme" title="Alternar tema">' + ICONS.sun + '</button>' +
       '<button class="act" data-act="settings" title="Configuracoes">' + ICONS.settings + '</button>';
     bar.querySelectorAll("[data-sec]").forEach((b) => b.addEventListener("click", () => { state.activeSection = b.dataset.sec; renderActivity(); renderSidebar(); renderTabs(); renderDoc(); renderInspector(); renderBottom(); }));
     bar.querySelector('[data-act="theme"]').addEventListener("click", toggleTheme);
     bar.querySelector('[data-act="settings"]').addEventListener("click", openSettings);
     const hb = bar.querySelector('[data-act="health"]'); if (hb) hb.addEventListener("click", openHealthPanel);
-    const cb = bar.querySelector('[data-act="companies"]'); if (cb) cb.addEventListener("click", openCompaniesPanel);
+    const cb = bar.querySelector('[data-act="companies"]'); if (cb) cb.addEventListener("click", openSuperAdmin);
   }
 
   // Menus suspensos estilo VS Code (Projeto / Editar / Visualizar / Ajuda).
@@ -870,6 +872,92 @@
     };
     modal.querySelector("[data-refresh]").addEventListener("click", load);
     load();
+  }
+
+  // ----------------------- Console Super Admin --------------------- //
+  let saTab = "empresas";
+  const SA_TABS = [
+    { id: "overview", label: "Visao geral" },
+    { id: "empresas", label: "Empresas" },
+  ];
+
+  /** Abre o console dedicado do super admin (tela cheia). */
+  function openSuperAdmin() {
+    if (!(state.user && state.user.is_super_admin)) { toast({ kind: "warn", msg: "Acesso restrito ao super admin." }); return; }
+    closeMenu();
+    $("login").classList.add("hidden");
+    $("ide").classList.add("hidden");
+    $("superadmin").classList.remove("hidden");
+    renderSuperAdmin();
+  }
+
+  /** Fecha o console e volta para o Studio. */
+  function closeSuperAdmin() {
+    $("superadmin").classList.add("hidden");
+    $("ide").classList.remove("hidden");
+    renderAll();
+  }
+
+  function renderSaTabs() {
+    const host = $("sa-tabs");
+    if (!host) return;
+    host.innerHTML = SA_TABS.map((t) => '<button class="sa-tab ' + (t.id === saTab ? "active" : "") + '" data-sa-tab="' + t.id + '">' + t.label + '</button>').join("");
+    host.querySelectorAll("[data-sa-tab]").forEach((b) => b.addEventListener("click", () => { saTab = b.dataset.saTab; renderSuperAdmin(); }));
+  }
+
+  async function renderSuperAdmin() {
+    renderSaTabs();
+    const body = $("sa-body");
+    if (!body) return;
+    body.innerHTML = '<p class="hint">Carregando...</p>';
+    let companies = [];
+    try { companies = await loadCompanies(); state.companies = companies; }
+    catch (err) { body.innerHTML = '<p class="empty">' + esc(err.message) + '</p>'; return; }
+    if (saTab === "overview") renderSaOverview(body, companies);
+    else renderSaCompanies(body, companies);
+  }
+
+  function saSwitcher(id, companies) {
+    const curLabel = state.activeCompanyId == null ? "Todas (visao global)" : ((companies.find((c) => c.id === state.activeCompanyId) || {}).name || "?");
+    return '<div class="field"><label>Empresa em foco</label><select id="' + id + '"><option value="">Todas (visao global)</option>' + companies.map((c) => '<option value="' + c.id + '"' + (c.id === state.activeCompanyId ? " selected" : "") + '>' + esc(c.name) + '</option>').join("") + '</select></div><span class="hint">Em foco: <b>' + esc(curLabel) + '</b>. Define o que voce ve e edita ao abrir o Studio.</span>';
+  }
+
+  function bindSaSwitcher(body, id) {
+    const sw = body.querySelector("#" + id);
+    if (sw) sw.addEventListener("change", async () => { state.activeCompanyId = sw.value ? Number(sw.value) : null; await loadAll(); toast({ kind: "ok", msg: "Empresa em foco alterada." }); renderSuperAdmin(); });
+  }
+
+  function renderSaOverview(body, companies) {
+    const sum = (k) => companies.reduce((a, c) => a + (c[k] || 0), 0);
+    const cards = [ { k: "Empresas", v: companies.length }, { k: "Telas", v: sum("screens") }, { k: "Midias", v: sum("media") }, { k: "Playlists", v: sum("playlists") }, { k: "Usuarios", v: sum("users") } ];
+    body.innerHTML = '<div class="sa-cards">' + cards.map((c) => '<div class="sa-card"><div class="k">' + c.k + '</div><div class="v">' + c.v + '</div></div>').join("") + '</div>' +
+      '<div class="sa-panel"><h3 class="sa-section-title">Empresa em foco</h3>' + saSwitcher("sa-switch", companies) +
+      '<div style="margin-top:14px"><button class="btn primary" id="sa-go-studio">Abrir Studio</button></div></div>';
+    bindSaSwitcher(body, "sa-switch");
+    const go = body.querySelector("#sa-go-studio"); if (go) go.addEventListener("click", closeSuperAdmin);
+  }
+
+  function renderSaCompanies(body, companies) {
+    const rows = companies.map((c) => '<tr><td>' + esc(c.name) + (c.is_active ? '' : ' <span class="tag">inativa</span>') + '</td><td class="mono">' + c.users + '</td><td class="mono">' + c.screens + '</td><td class="mono">' + c.media + '</td><td class="mono">' + c.playlists + '</td><td><button class="btn ghost small" data-enter="' + c.id + '" title="Abrir Studio desta empresa">' + ICONS.eye + '</button><button class="btn ghost small" data-logo="' + c.id + '" title="Enviar logo">' + ICONS.upload + '</button><button class="btn ghost small" data-edit="' + c.id + '" title="Renomear">' + ICONS.settings + '</button><button class="btn danger small" data-delc="' + c.id + '" title="Excluir">' + ICONS.trash + '</button></td></tr>').join("");
+    body.innerHTML = '<div class="sa-panel"><h3 class="sa-section-title">Empresa em foco</h3>' + saSwitcher("sa-switch2", companies) + '</div>' +
+      '<div class="sa-panel"><h3 class="sa-section-title">Empresas (clientes)</h3><table class="set-table"><thead><tr><th>Empresa</th><th>Usuarios</th><th>Telas</th><th>Midias</th><th>Playlists</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<div class="sa-panel"><h3 class="sa-section-title">Nova empresa</h3>' +
+      '<div class="row" style="gap:10px"><div class="field grow"><label>Nome</label><input id="nc-name"/></div><div class="field"><label>Cor (hex)</label><input id="nc-color" placeholder="#7aa2f7"/></div></div>' +
+      '<div class="row" style="gap:10px"><div class="field grow"><label>Admin (opcional)</label><input id="nc-admin"/></div><div class="field grow"><label>Senha do admin</label><input type="password" id="nc-pass"/></div></div>' +
+      '<button class="btn primary" id="nc-add">' + ICONS.plus + ' Criar empresa</button></div>';
+    bindSaSwitcher(body, "sa-switch2");
+    body.querySelector("#nc-add").addEventListener("click", async () => {
+      const name = body.querySelector("#nc-name").value.trim();
+      if (name.length < 2) { toast({ kind: "warn", msg: "Informe o nome da empresa." }); return; }
+      const payload = { name: name, primary_color: body.querySelector("#nc-color").value.trim() || null };
+      const au = body.querySelector("#nc-admin").value.trim(), ap = body.querySelector("#nc-pass").value;
+      if (au && ap) { payload.admin_username = au; payload.admin_password = ap; }
+      try { await createCompany(payload); toast({ kind: "ok", msg: "Empresa criada." }); renderSuperAdmin(); } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
+    body.querySelectorAll("[data-enter]").forEach((b) => b.addEventListener("click", async () => { state.activeCompanyId = Number(b.dataset.enter); await loadAll(); toast({ kind: "ok", msg: "Abrindo Studio da empresa." }); closeSuperAdmin(); }));
+    body.querySelectorAll("[data-delc]").forEach((b) => b.addEventListener("click", async () => { const id = Number(b.dataset.delc); if (!(await confirmDialog({ title: "Excluir empresa", message: "Remover a empresa e TODO o seu conteudo (telas, midias, playlists, usuarios)? Esta acao nao pode ser desfeita.", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await deleteCompany(id); if (state.activeCompanyId === id) { state.activeCompanyId = null; await loadAll(); } toast({ kind: "warn", msg: "Empresa removida." }); renderSuperAdmin(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+    body.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", async () => { const id = Number(b.dataset.edit); const c = companies.find((x) => x.id === id); const name = await promptDialog({ title: "Renomear empresa", message: "Novo nome da empresa:", icon: "settings", defaultValue: c ? c.name : "", confirmText: "Salvar" }); if (!name) return; try { await updateCompany(id, { name: name }); toast({ kind: "ok", msg: "Empresa atualizada." }); await refreshBranding(); renderSuperAdmin(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+    body.querySelectorAll("[data-logo]").forEach((b) => b.addEventListener("click", () => { const id = Number(b.dataset.logo); const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.addEventListener("change", async () => { if (!inp.files || !inp.files[0]) return; try { await uploadCompanyLogo(id, inp.files[0]); toast({ kind: "ok", msg: "Logo atualizado." }); await refreshBranding(); renderSuperAdmin(); } catch (err) { toast({ kind: "err", msg: err.message }); } }); inp.click(); }));
   }
 
   /** Painel de super admin: gestao de empresas (clientes) e troca de empresa em foco. */
@@ -1484,12 +1572,19 @@
   function renderAll() { renderActivity(); renderMenu(); renderSidebar(); renderTabs(); renderDoc(); renderInspector(); renderBottom(); renderStatus(); }
 
   // ----------------------------- Auth ------------------------------ //
-  function showApp() { $("login").classList.add("hidden"); $("ide").classList.remove("hidden"); loadAll(); maybeOnboard(); }
+  async function showApp() {
+    $("login").classList.add("hidden"); $("ide").classList.remove("hidden");
+    if (!state.user) {
+      try { const me = await loadMe(); state.user = { username: me.username, role: me.role, is_super_admin: !!me.is_super_admin, company_id: me.company_id }; }
+      catch (e) { /* segue sem perfil */ }
+    }
+    await loadAll(); maybeOnboard();
+  }
   function logout() {
     try {
       if (token) fetch("/api/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + token }, keepalive: true }).catch(() => {});
     } catch (e) { /* best-effort */ }
-    token = null; state.user = null; state.activeCompanyId = null; state.companies = []; state.branding = null; localStorage.removeItem(TOKEN_KEY); $("ide").classList.add("hidden"); $("login").classList.remove("hidden");
+    token = null; state.user = null; state.activeCompanyId = null; state.companies = []; state.branding = null; localStorage.removeItem(TOKEN_KEY); $("superadmin").classList.add("hidden"); $("ide").classList.add("hidden"); $("login").classList.remove("hidden");
   }
 
   // --------------------------- Inicializacao ----------------------- //
@@ -1499,6 +1594,11 @@
     $("login-mark").innerHTML = ICONS.logo;
     $("cmd-open-icon").innerHTML = ICONS.search;
     $("logout-icon").innerHTML = ICONS.power;
+    $("sa-mark").innerHTML = ICONS.shield;
+    $("sa-studio-ico").innerHTML = ICONS.layout;
+    $("sa-logout-ico").innerHTML = ICONS.power;
+    $("sa-open-studio").addEventListener("click", closeSuperAdmin);
+    $("sa-logout").addEventListener("click", logout);
 
     $("login-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -1507,7 +1607,7 @@
       try {
         const resp = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: username, password: password }) });
         if (!resp.ok) throw new Error("Senha incorreta.");
-        const json = await resp.json(); token = json.token; state.user = { username: json.username, role: json.role, is_super_admin: !!json.is_super_admin, company_id: json.company_id, company_name: json.company_name }; state.activeCompanyId = null; localStorage.setItem(TOKEN_KEY, token); showApp();
+        const json = await resp.json(); token = json.token; state.user = { username: json.username, role: json.role, is_super_admin: !!json.is_super_admin, company_id: json.company_id, company_name: json.company_name }; state.activeCompanyId = null; localStorage.setItem(TOKEN_KEY, token); await showApp(); if (state.user && state.user.is_super_admin) openSuperAdmin();
       } catch (err) { errEl.textContent = err.message; }
     });
     $("logout").addEventListener("click", logout);
