@@ -9,7 +9,7 @@ backend/data/
 data/
 *.db
 *.sqlite3
-
+commitar.sh
 # Ambiente
 .env
 
