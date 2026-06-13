@@ -6,7 +6,7 @@
  *  - Chamadas /api/ e /media/: network-first (dados sempre atuais).
  */
 
-const CACHE = "tvmedia-studio-v3";
+const CACHE = "tvmedia-studio-v4";
 const ASSETS = [
   "./",
   "./index.html",
