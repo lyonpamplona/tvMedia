@@ -518,12 +518,18 @@
     const stage = $("stage");
     if (!stage) return;
     if (!sc) { stage.innerHTML = ""; return; }
+    const ar = screenAspect(sc);
+    stage.style.aspectRatio = ar.w + " / " + ar.h;
+    if (ar.w >= ar.h) { stage.style.width = "100%"; stage.style.height = "auto"; stage.style.maxWidth = "1024px"; stage.style.maxHeight = "100%"; }
+    else { stage.style.width = "auto"; stage.style.height = "min(100%, 68vh)"; stage.style.maxWidth = "100%"; stage.style.maxHeight = "100%"; }
     stage.innerHTML = sc.zones.slice().sort((a, b) => a.z_index - b.z_index).map((z) => {
       const pl = playlistById(z.default_playlist_id);
       const body = pl ? esc(pl.name) + " - " + pl.items.length + " item(s)" : "Sem playlist padrao";
       return '<div class="zone ' + (z.id === state.selectedZoneId ? "selected" : "") + '" data-zone="' + z.id + '" style="left:' + z.x + '%;top:' + z.y + '%;width:' + z.width + '%;height:' + z.height + '%"><div class="zone-label">' + ICONS.layout + '<span>' + esc(z.name) + '</span></div><div class="zone-body">' + body + '</div><div class="resize" data-resize="' + z.id + '"></div></div>';
     }).join("");
-    $("stage-hint").textContent = sc.name + " - " + sc.zones.length + " zona(s) - arraste para mover, use o canto para redimensionar";
+    const resTxt = (sc.resolution || "1920x1080") + (sc.orientation === "portrait" ? " vertical" : " horizontal");
+    $("stage-hint").innerHTML = esc(sc.name) + " &middot; " + esc(resTxt) + " &middot; " + sc.zones.length + " zona(s) &middot; <a href=\"#\" id=\"screen-size-edit\" style=\"color:#7aa2f7\">ajustar tamanho</a>";
+    const sizeEdit = $("screen-size-edit"); if (sizeEdit) sizeEdit.addEventListener("click", (e) => { e.preventDefault(); openScreenSizeModal(sc); });
     bindZoneInteractions();
   }
 
@@ -1097,6 +1103,68 @@
     modal.querySelector("[data-open]").addEventListener("click", () => window.open(url, "_blank"));
   }
 
+  const SCREEN_SIZES = [
+    { inches: "3", label: "3\" \u2014 mini display", res: ["480x320", "320x480"] },
+    { inches: "7", label: "7\" \u2014 painel pequeno", res: ["1024x600", "1280x800"] },
+    { inches: "14", label: "14\" \u2014 monitor", res: ["1920x1080", "1366x768"] },
+    { inches: "32", label: "32\" \u2014 TV", res: ["1920x1080", "1366x768"] },
+    { inches: "43", label: "43\" \u2014 TV Full HD/4K", res: ["1920x1080", "3840x2160"] },
+    { inches: "50", label: "50\" \u2014 TV 4K", res: ["3840x2160", "1920x1080"] },
+  ];
+  function sizeByInches(inches) { return SCREEN_SIZES.find((s) => s.inches === String(inches)) || SCREEN_SIZES[3]; }
+  function screenAspect(sc) {
+    const parts = String((sc && sc.resolution) || "1920x1080").toLowerCase().split("x");
+    let w = Number(parts[0]) || 1920; let h = Number(parts[1]) || 1080;
+    if (((sc && sc.orientation) || "landscape") === "portrait") { const t = w; w = h; h = t; }
+    return { w: w, h: h };
+  }
+  function sizePickerMarkup(curInches, curRes, curOrient) {
+    const inches = curInches || "32";
+    const size = sizeByInches(inches);
+    const sizeOpts = SCREEN_SIZES.map((s) => "<option value=\"" + s.inches + "\"" + (s.inches === inches ? " selected" : "") + ">" + s.label + "</option>").join("");
+    const chosenRes = curRes || size.res[0];
+    const resOpts = size.res.map((r) => "<option value=\"" + r + "\"" + (r === chosenRes ? " selected" : "") + ">" + r.replace("x", " x ") + " px</option>").join("");
+    const orient = curOrient || "landscape";
+    return "<div class=\"row\" style=\"gap:10px\">" +
+      "<div class=\"field grow\"><label>Tamanho da tela</label><select id=\"sw-size\">" + sizeOpts + "</select></div>" +
+      "<div class=\"field grow\"><label>Resolucao</label><select id=\"sw-res\">" + resOpts + "</select></div>" +
+      "<div class=\"field\"><label>Orientacao</label><select id=\"sw-orient\"><option value=\"landscape\"" + (orient === "landscape" ? " selected" : "") + ">Horizontal</option><option value=\"portrait\"" + (orient === "portrait" ? " selected" : "") + ">Vertical</option></select></div>" +
+      "</div>";
+  }
+  function bindSizePicker(root) {
+    const sizeSel = root.querySelector("#sw-size");
+    const resSel = root.querySelector("#sw-res");
+    if (sizeSel && resSel) {
+      sizeSel.addEventListener("change", () => {
+        const size = sizeByInches(sizeSel.value);
+        resSel.innerHTML = size.res.map((r) => "<option value=\"" + r + "\">" + r.replace("x", " x ") + " px</option>").join("");
+      });
+    }
+    return () => ({
+      size_inches: sizeSel ? sizeSel.value : null,
+      resolution: resSel ? resSel.value : null,
+      orientation: root.querySelector("#sw-orient") ? root.querySelector("#sw-orient").value : "landscape",
+    });
+  }
+  function openScreenSizeModal(sc) {
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    const curInches = sc.size_inches || "32";
+    modal.innerHTML = "<div class=\"modal-head\"><span class=\"modal-ico\">" + ICONS.screen + "</span><span class=\"modal-title\">Tamanho da tela</span></div>" +
+      "<div class=\"modal-body\">" + sizePickerMarkup(curInches, sc.resolution, sc.orientation || "landscape") + "<p style=\"color:#94a3b8;font-size:12px;margin-top:8px\">A area de criacao passa a usar a proporcao da tela escolhida, para o conteudo preencher a tela sem sobras nos cantos.</p></div>" +
+      "<div class=\"modal-actions\"><button class=\"btn ghost\" data-cancel>Cancelar</button><button class=\"btn primary\" data-save>" + ICONS.check + " Salvar</button></div>";
+    const ui = buildOverlay(modal);
+    const readSize = bindSizePicker(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    modal.querySelector("[data-save]").addEventListener("click", async () => {
+      const sz = readSize();
+      try {
+        await api("/api/screens/" + sc.id, { method: "PATCH", body: JSON.stringify({ resolution: sz.resolution, orientation: sz.orientation, size_inches: sz.size_inches }) });
+        ui.close(); await loadScreens(); renderAll(); toast({ kind: "ok", msg: "Tamanho da tela atualizado." });
+      } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
+  }
+
   function openScreenWizard() {
     let chosen = "full";
     const modal = document.createElement("div");
@@ -1105,10 +1173,12 @@
     modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.screen + '</span><span class="modal-title">Nova tela</span></div>' +
       '<div class="modal-body"><div class="field"><label>Nome da tela</label><input id="sw-name" value="Nova TV"/></div>' +
       '<div class="row" style="gap:10px"><div class="field grow"><label>Fuso horario</label><input id="sw-tz" value="America/Sao_Paulo"/></div><div class="field grow"><label>Grupo de sincronia (opcional)</label><input id="sw-sync" placeholder="ex.: loja-1"/></div></div>' +
+      sizePickerMarkup("32", null, "landscape") +
       '<div class="field"><label>Template (cenario pronto)</label><select id="sw-template"><option value="">Personalizado (escolher layout abaixo)</option></select></div>' +
       '<label class="mm-label" id="sw-layout-label">Layout inicial</label><div class="layout-grid" id="sw-layout-grid">' + cards + '</div></div>' +
       '<div class="modal-actions"><button class="btn ghost" data-cancel>Cancelar</button><button class="btn primary" data-create>' + ICONS.check + ' Criar tela</button></div>';
     const ui = buildOverlay(modal);
+    const readSize = bindSizePicker(modal);
     const setLayout = (k) => { chosen = k; modal.querySelectorAll(".layout-card").forEach((c) => c.classList.toggle("active", c.dataset.layout === k)); };
     modal.querySelectorAll(".layout-card").forEach((c) => c.addEventListener("click", () => setLayout(c.dataset.layout)));
     setLayout("full");
@@ -1122,8 +1192,9 @@
       const tz = modal.querySelector("#sw-tz").value.trim() || "America/Sao_Paulo";
       const template = tplSel.value || null;
       const syncGroup = (modal.querySelector("#sw-sync").value || "").trim() || null;
+      const sz = readSize();
       try {
-        const created = await api("/api/screens", { method: "POST", body: JSON.stringify({ name: name, timezone: tz, template: template, sync_group: syncGroup }) });
+        const created = await api("/api/screens", { method: "POST", body: JSON.stringify({ name: name, timezone: tz, template: template, sync_group: syncGroup, resolution: sz.resolution, orientation: sz.orientation, size_inches: sz.size_inches }) });
         if (!template) {
           const layout = SCREEN_LAYOUTS[chosen].zones;
           await loadScreens();

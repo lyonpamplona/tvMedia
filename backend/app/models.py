@@ -270,6 +270,10 @@ class Screen(Base):
     )
     # Grupo de sincronia: telas no mesmo grupo recarregam juntas (parque de TVs).
     sync_group: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # Resolucao nativa do painel (ex.: "1920x1080"), orientacao e tamanho em polegadas.
+    resolution: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    orientation: Mapped[str] = mapped_column(String(16), nullable=False, default="landscape")
+    size_inches: Mapped[str | None] = mapped_column(String(8), nullable=True)
     company_id: Mapped[int | None] = mapped_column(
         ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
     )
