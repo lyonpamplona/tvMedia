@@ -304,6 +304,7 @@
     return built.wrap;
   }
 
+  const FOCAL_POS = { center: "center", top: "top center", bottom: "bottom center", left: "center left", right: "center right" };
   function createMediaElement(item, onVideoEnded) {
     switch (item.type) {
       case "image": {
@@ -410,6 +411,7 @@
       // Monta a nova camada.
       const layer = document.createElement("div");
       layer.className = `layer fit-${item.fit || "contain"}`;
+      layer.style.setProperty("--focal", FOCAL_POS[item.focal] || "center");
       if (item.transition === "slide") layer.classList.add("slide");
       else if (item.transition !== "none") layer.classList.add("fade");
 
@@ -463,7 +465,15 @@
    * (Re)inicia a reprodução de todas as zonas do payload.
    * @param {Object} payload Payload de exibição retornado pelo backend.
    */
+  function applyEmergency(msg) {
+    const el = document.getElementById("emergency");
+    if (!el) return;
+    if (msg && String(msg).trim()) { el.textContent = String(msg); el.classList.add("show"); }
+    else { el.classList.remove("show"); el.textContent = ""; }
+  }
+
   function render(payload) {
+    applyEmergency(payload.emergency_message);
     // Para as zonas anteriores.
     zoneControllers.forEach((z) => z.stop());
     zoneControllers = [];
@@ -595,6 +605,7 @@
       if (document.hidden) playReporter.flush(true);
     });
     window.addEventListener("pagehide", () => playReporter.flush(true));
+    if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(() => {}); }
   }
 
   init();
