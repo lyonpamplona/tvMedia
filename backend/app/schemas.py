@@ -394,6 +394,9 @@ class ScreenUpdate(BaseModel):
 
     name: str | None = Field(None, max_length=255)
     timezone: str | None = None
+    background_audio_id: int | None = Field(
+        None, description="Midia de audio (tela inteira) tocada em loop."
+    )
 
 
 class ScreenRead(BaseModel):
@@ -407,6 +410,7 @@ class ScreenRead(BaseModel):
     timezone: str
     created_at: datetime
     last_seen: datetime | None = None
+    background_audio_id: int | None = None
     zones: list[ZoneRead] = []
 
 
@@ -459,6 +463,7 @@ class DisplayPayload(BaseModel):
     screen: str
     revision: str
     zones: list[DisplayZone] = []
+    background_audio: str | None = None
 
 
 # --------------------------------------------------------------------------- #

@@ -28,7 +28,11 @@ def media_url(base_url: str, media: models.Media) -> str | None:
     Returns:
         str | None: URL absoluta do arquivo/origem, ou None para texto/HTML.
     """
-    if media.type in (models.MediaType.image, models.MediaType.video) and media.path:
+    if (
+        media.type
+        in (models.MediaType.image, models.MediaType.video, models.MediaType.audio)
+        and media.path
+    ):
         return base_url + f"media/{media.path}"
     if media.type == models.MediaType.url:
         return media.source_url
@@ -110,6 +114,16 @@ def build_display_payload(
         build_zone_payload(base_url, db, zone, now)
         for zone in sorted(screen.zones, key=lambda z: z.z_index)
     ]
-    payload = schemas.DisplayPayload(screen=screen.slug, revision="", zones=zones)
+    background_audio = None
+    if screen.background_audio_id is not None:
+        audio_media = crud.get_media(db, screen.background_audio_id)
+        if audio_media is not None:
+            background_audio = media_url(base_url, audio_media)
+    payload = schemas.DisplayPayload(
+        screen=screen.slug,
+        revision="",
+        zones=zones,
+        background_audio=background_audio,
+    )
     payload.revision = compute_revision(payload)
     return payload

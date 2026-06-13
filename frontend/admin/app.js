@@ -57,8 +57,20 @@
     tag: S('<path d="M3 3h8l10 10-8 8L3 11z"/><circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" stroke="none"/>'),
   };
 
-  const TYPE_ICON = { image: "image", video: "video", text: "text", html: "code", url: "link", youtube: "youtube", embed: "music" };
-  const TYPE_LABEL = { image: "Imagem", video: "Video", text: "Texto", html: "HTML", url: "URL", youtube: "YouTube", embed: "Embed" };
+  const TYPE_ICON = { image: "image", video: "video", text: "text", html: "code", url: "link", youtube: "youtube", embed: "music", audio: "music" };
+  const TYPE_LABEL = { image: "Imagem", video: "Video", text: "Texto", html: "HTML", url: "URL", youtube: "YouTube", embed: "Embed", audio: "Audio" };
+  // Modelos prontos de conteudo para acelerar a criacao de textos/cartazes.
+  const MEDIA_TEMPLATES = {
+    promo: { label: "Promocao", text: "OFERTA ESPECIAL\n50% OFF\nSomente hoje. Aproveite!", html: '<div style="text-align:center;color:#fff;font-family:system-ui"><div style="font-size:3vmin;letter-spacing:.3em;color:#7aa2f7">OFERTA ESPECIAL</div><div style="font-size:12vmin;font-weight:800;line-height:1">50% OFF</div><div style="font-size:3.5vmin;margin-top:2vmin">Somente hoje. Aproveite!</div></div>' },
+    cardapio: { label: "Cardapio", text: "CARDAPIO DO DIA\nPrato executivo - R$ 25\nMassa da casa - R$ 30\nSobremesa - R$ 12", html: '<div style="color:#fff;font-family:system-ui;text-align:center"><div style="font-size:6vmin;font-weight:800;margin-bottom:3vmin">Cardapio do dia</div><div style="font-size:4vmin;line-height:1.8"><div>Prato executivo &mdash; R$ 25</div><div>Massa da casa &mdash; R$ 30</div><div>Sobremesa &mdash; R$ 12</div></div></div>' },
+    aviso: { label: "Aviso", text: "AVISO IMPORTANTE\nEscreva aqui a sua mensagem.", html: '<div style="text-align:center;color:#fff;font-family:system-ui"><div style="font-size:9vmin">&#9888;</div><div style="font-size:6vmin;font-weight:800;margin:2vmin 0">Aviso importante</div><div style="font-size:3.6vmin">Escreva aqui a sua mensagem.</div></div>' },
+  };
+  // Layouts iniciais oferecidos no assistente de nova tela (zonas em % da tela).
+  const SCREEN_LAYOUTS = {
+    full: { label: "1 zona (tela cheia)", zones: [{ name: "Principal", x: 0, y: 0, width: 100, height: 100 }] },
+    split: { label: "2 zonas (lado a lado)", zones: [{ name: "Esquerda", x: 0, y: 0, width: 50, height: 100 }, { name: "Direita", x: 50, y: 0, width: 50, height: 100 }] },
+    triptico: { label: "3 zonas (banner + 2 colunas)", zones: [{ name: "Banner", x: 0, y: 0, width: 100, height: 60 }, { name: "Inferior esq.", x: 0, y: 60, width: 50, height: 40 }, { name: "Inferior dir.", x: 50, y: 60, width: 50, height: 40 }] },
+  };
   const FITS = ["contain", "cover", "fill"];
   const TRANSITIONS = ["none", "fade", "slide"];
   const DAYS = ["S", "T", "Q", "Q", "S", "S", "D"];
@@ -429,10 +441,8 @@
   async function handleSideAct(act) {
     try {
       if (act === "reload") { await loadAll(); toast({ kind: "info", msg: "Projeto recarregado." }); }
-      else if (act === "add-screen") {
-        const created = await api("/api/screens", { method: "POST", body: JSON.stringify({ name: "Nova TV", timezone: "America/Sao_Paulo" }) });
-        await loadScreens(); state.activeScreenId = created.id; const s = screen(); state.selectedZoneId = s && s.zones[0] ? s.zones[0].id : null; renderAll(); toast({ kind: "ok", msg: "Tela criada." });
-      } else if (act === "add-playlist") {
+      else if (act === "add-screen") { openScreenWizard(); }
+      else if (act === "add-playlist") {
         const created = await api("/api/playlists", { method: "POST", body: JSON.stringify({ name: "Nova playlist" }) });
         await loadPlaylists(); state.openPlaylistId = created.id; renderSidebar(); renderTabs(); renderDoc(); toast({ kind: "ok", msg: "Playlist criada." });
       } else if (act === "add-media") { openMediaModal(); }
@@ -493,6 +503,12 @@
         state.selectedZoneId = z.id; renderInspector(); markSelected();
         startDrag(e, z, "move");
       });
+      el.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        const z = zoneOf(Number(el.dataset.zone));
+        state.selectedZoneId = z.id; markSelected(); renderInspector();
+        openZoneQuickMenu(e.clientX, e.clientY, z.id);
+      });
     });
     stage.querySelectorAll("[data-resize]").forEach((el) => {
       el.addEventListener("pointerdown", (e) => { e.stopPropagation(); const z = zoneOf(Number(el.dataset.resize)); state.selectedZoneId = z.id; renderInspector(); markSelected(); startDrag(e, z, "resize"); });
@@ -538,7 +554,10 @@
     insp.innerHTML = '<div class="insp-head">' + ICONS.layout + '<span>Zona: ' + esc(z.name) + '</span></div>' +
       '<div class="insp-section"><h5>Identificacao</h5>' + field("Nome", '<input id="f-name" value="' + esc(z.name) + '"/>') + field("Camada (z-index)", '<input id="f-z" type="number" value="' + z.z_index + '"/>') + '</div>' +
       '<div class="insp-section"><h5>Geometria (% da tela)</h5><div class="grid2">' + rangeField("x", "X", z.x) + rangeField("y", "Y", z.y) + rangeField("w", "Largura", z.width) + rangeField("h", "Altura", z.height) + '</div></div>' +
-      '<div class="insp-section"><h5>Conteudo</h5>' + field("Playlist padrao", '<select id="f-playlist"><option value="">- sem playlist -</option>' + state.playlists.map((p) => '<option value="' + p.id + '"' + (p.id === z.default_playlist_id ? " selected" : "") + '>' + esc(p.name) + '</option>').join("") + '</select>') +
+      '<div class="insp-section"><h5>Conteudo</h5>' +
+      '<button class="btn primary block" data-quick-add>' + ICONS.plus + ' Adicionar conteudo</button>' +
+      '<span class="hint" style="display:block;margin:6px 0 10px">Dica: clique com o botao direito na zona (no canvas) para abrir o menu rapido.</span>' +
+      field("Playlist padrao", '<select id="f-playlist"><option value="">- sem playlist -</option>' + state.playlists.map((p) => '<option value="' + p.id + '"' + (p.id === z.default_playlist_id ? " selected" : "") + '>' + esc(p.name) + '</option>').join("") + '</select>') +
       '<button class="btn ghost block small" data-open-playlist>' + ICONS.playlist + ' Abrir no editor de playlists</button></div>' +
       '<div class="insp-section"><h5>Agendamentos</h5>' + (z.schedules.length ? z.schedules.map(schedCard).join("") : '<div class="empty" style="padding:0 0 8px">Sem agendamentos. A playlist padrao toca sempre.</div>') + schedForm(z) + '</div>' +
       '<div class="insp-section"><button class="btn block" data-dup-zone>' + ICONS.copy + ' Duplicar zona</button><button class="btn danger block small" style="margin-top:8px" data-del-zone>' + ICONS.trash + ' Excluir zona</button></div>';
@@ -551,7 +570,9 @@
       field("Slug (somente leitura)", '<input value="' + esc(sc.slug) + '" readonly/>') +
       '<div class="field"><label>Link do player (TV)</label><div class="code">' + esc(playerUrl(sc.slug)) + '</div></div>' +
       '<button class="btn ghost block small" data-copy-link>' + ICONS.copy + ' Copiar link</button>' +
-      '<button class="btn ghost block small" style="margin-top:8px" data-preview-screen>' + ICONS.eye + ' Pre-visualizar player</button></div>' +
+      '<button class="btn ghost block small" style="margin-top:8px" data-preview-screen>' + ICONS.eye + ' Pre-visualizar player</button>' +
+      '<button class="btn ghost block small" style="margin-top:8px" data-live-preview>' + ICONS.eye + ' Pre-visualizar ao vivo (no painel)</button></div>' +
+      '<div class="insp-section"><h5>Musica de fundo (tela)</h5>' + screenMusicField(sc) + '</div>' +
       '<div class="insp-section"><button class="btn block" data-add-zone>' + ICONS.plus + ' Adicionar zona</button><button class="btn danger block small" style="margin-top:8px" data-del-screen>' + ICONS.trash + ' Excluir tela</button></div>';
   }
 
@@ -579,6 +600,7 @@
       });
       const pl = $("f-playlist"); if (pl) pl.addEventListener("change", () => { z.default_playlist_id = pl.value ? Number(pl.value) : null; patchZone(z.id, { default_playlist_id: z.default_playlist_id }); renderStage(); renderBottom(); });
       const op = insp.querySelector("[data-open-playlist]"); if (op) op.addEventListener("click", () => { if (z.default_playlist_id) state.openPlaylistId = z.default_playlist_id; state.activeSection = "playlists"; renderActivity(); renderSidebar(); renderTabs(); renderDoc(); renderInspector(); renderBottom(); });
+      const qa = insp.querySelector("[data-quick-add]"); if (qa) qa.addEventListener("click", () => { const r = qa.getBoundingClientRect(); openZoneQuickMenu(r.left, r.bottom + 4, z.id); });
       const dz = insp.querySelector("[data-dup-zone]"); if (dz) dz.addEventListener("click", async () => { try { await api("/api/screens/" + screenId + "/zones", { method: "POST", body: JSON.stringify({ name: z.name + " (copia)", x: clamp(z.x + 5, 0, 90), y: clamp(z.y + 5, 0, 90), width: z.width, height: z.height, z_index: z.z_index + 1, default_playlist_id: z.default_playlist_id }) }); await loadScreens(); const s = screen(); state.selectedZoneId = s.zones[s.zones.length - 1].id; renderAll(); toast({ kind: "ok", msg: "Zona duplicada." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
       const del = insp.querySelector("[data-del-zone]"); if (del) del.addEventListener("click", async () => { if (!(await confirmDialog({ title: "Excluir zona", message: "Tem certeza que deseja excluir esta zona? Esta acao nao pode ser desfeita.", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await api("/api/screens/" + screenId + "/zones/" + z.id, { method: "DELETE" }); await loadScreens(); const s = screen(); state.selectedZoneId = s && s.zones[0] ? s.zones[0].id : null; renderAll(); toast({ kind: "warn", msg: "Zona excluida." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
       insp.querySelectorAll("#sf-days .day").forEach((d) => d.addEventListener("click", () => d.classList.toggle("on")));
@@ -590,6 +612,9 @@
       const tz = $("f-tz"); if (tz) tz.addEventListener("change", () => patchScreen(sc.id, { timezone: tz.value }));
       const cl = insp.querySelector("[data-copy-link]"); if (cl) cl.addEventListener("click", () => copyText(playerUrl(sc.slug)));
       const pv = insp.querySelector("[data-preview-screen]"); if (pv) pv.addEventListener("click", () => window.open(playerUrl(sc.slug), "_blank"));
+      const lp = insp.querySelector("[data-live-preview]"); if (lp) lp.addEventListener("click", () => openLivePreview(sc));
+      const bg = $("f-bgaudio"); if (bg) bg.addEventListener("change", () => setScreenMusic(bg.value ? Number(bg.value) : null));
+      const um = insp.querySelector("[data-upload-music]"); if (um) um.addEventListener("click", uploadScreenMusic);
       const az = insp.querySelector("[data-add-zone]"); if (az) az.addEventListener("click", async () => { try { await api("/api/screens/" + sc.id + "/zones", { method: "POST", body: JSON.stringify({ name: "Nova zona", x: 10, y: 10, width: 40, height: 40, z_index: sc.zones.length + 1 }) }); await loadScreens(); const s = screen(); state.selectedZoneId = s.zones[s.zones.length - 1].id; renderAll(); toast({ kind: "ok", msg: "Zona adicionada." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
       const ds = insp.querySelector("[data-del-screen]"); if (ds) ds.addEventListener("click", async () => { if (!(await confirmDialog({ title: "Excluir tela", message: "Tem certeza que deseja excluir esta tela e todas as suas zonas? Esta acao nao pode ser desfeita.", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await api("/api/screens/" + sc.id, { method: "DELETE" }); await loadScreens(); fixSelection(); renderAll(); toast({ kind: "warn", msg: "Tela excluida." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
     }
@@ -691,17 +716,175 @@
   }
 
   // Modal guiado de Nova midia: escolha de tipo, campos contextuais e drag-and-drop.
-  function openMediaModal() {
+  // ---- v17: helpers de musica de fundo, menu rapido e assistentes ---- //
+
+  /** Garante que a zona tenha uma playlist padrao, criando uma se necessario. */
+  async function ensureZonePlaylist(z) {
+    if (z.default_playlist_id) return z.default_playlist_id;
+    const sc = screen();
+    const baseName = (sc ? sc.name + " - " : "") + (z.name || "Zona");
+    const pl = await api("/api/playlists", { method: "POST", body: JSON.stringify({ name: baseName }) });
+    await api("/api/screens/" + state.activeScreenId + "/zones/" + z.id, { method: "PATCH", body: JSON.stringify({ default_playlist_id: pl.id }) });
+    z.default_playlist_id = pl.id;
+    await loadPlaylists();
+    return pl.id;
+  }
+
+  /** Adiciona uma midia ja criada a playlist padrao da zona. */
+  async function addMediaToZonePlaylist(z, media) {
+    const plId = await ensureZonePlaylist(z);
+    const isVideo = media.type === "video";
+    await api("/api/playlists/" + plId + "/items", { method: "POST", body: JSON.stringify({ media_id: media.id, duration: isVideo ? 30 : 12, fit: "contain", transition: "fade", muted: !isVideo }) });
+    await loadPlaylists(); await loadScreens();
+  }
+
+  /** Menu rapido (dropdown / clique direito) de uma zona. */
+  function quickAddToZone(zoneId, kind) {
+    const sc = screen();
+    const z = sc ? sc.zones.find((x) => x.id === zoneId) : null;
+    if (!z) { toast({ kind: "warn", msg: "Selecione uma zona primeiro." }); return; }
+    if (kind === "music") { chooseScreenMusic(); return; }
+    const titles = { text: "Criar texto", image: "Anexar foto", video: "Anexar video", url: "Adicionar link / YouTube", "text-music": "Texto com musica de fundo" };
+    const lock = (kind !== "url");
+    const presetType = (kind === "text-music") ? "text" : (kind === "url" ? "youtube" : kind);
+    openMediaModal({ presetType: presetType, lockType: lock, title: titles[kind] || "Adicionar conteudo", onCreated: async (media) => {
+      try {
+        await addMediaToZonePlaylist(z, media);
+        state.selectedZoneId = z.id; renderAll();
+        if (kind === "text-music") { toast({ kind: "ok", msg: "Texto adicionado. Agora escolha a musica de fundo." }); chooseScreenMusic(); }
+        else { toast({ kind: "ok", msg: "Conteudo adicionado a zona." }); }
+      } catch (err) { toast({ kind: "err", msg: err.message }); }
+    } });
+  }
+
+  /** Menu de contexto posicionado (clique direito na zona, dentro do canvas). */
+  function openZoneQuickMenu(x, y, zoneId) {
+    closeZoneQuickMenu();
+    const opts = [
+      { k: "text", ic: "text", lb: "Criar texto" },
+      { k: "image", ic: "image", lb: "Anexar foto" },
+      { k: "video", ic: "video", lb: "Anexar video" },
+      { k: "url", ic: "link", lb: "Adicionar link / YouTube" },
+      { k: "text-music", ic: "music", lb: "Texto com musica de fundo" },
+      { k: "music", ic: "music", lb: "Musica de fundo (tela)" },
+    ];
+    const menu = document.createElement("div");
+    menu.className = "ctx-menu";
+    menu.id = "zone-ctx";
+    menu.innerHTML = opts.map((o) => '<button class="ctx-item" data-qa="' + o.k + '">' + ICONS[o.ic] + '<span>' + o.lb + '</span></button>').join("");
+    document.body.appendChild(menu);
+    const w = 230; const h = menu.offsetHeight || 280;
+    menu.style.left = Math.min(x, window.innerWidth - w - 8) + "px";
+    menu.style.top = Math.min(y, window.innerHeight - h - 8) + "px";
+    menu.querySelectorAll("[data-qa]").forEach((b) => b.addEventListener("click", () => { const k = b.dataset.qa; closeZoneQuickMenu(); quickAddToZone(zoneId, k); }));
+  }
+  function closeZoneQuickMenu() { const m = document.getElementById("zone-ctx"); if (m) m.remove(); }
+
+  /** Define (ou remove, com null) a musica de fundo da tela atual. */
+  async function setScreenMusic(mediaId) {
+    const sc = screen(); if (!sc) return;
+    try {
+      await api("/api/screens/" + sc.id, { method: "PATCH", body: JSON.stringify({ background_audio_id: mediaId }) });
+      sc.background_audio_id = mediaId;
+      await loadScreens(); renderInspector();
+      toast({ kind: "ok", msg: mediaId ? "Musica de fundo definida." : "Musica de fundo removida." });
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+  function uploadScreenMusic() {
+    openMediaModal({ presetType: "audio", lockType: true, title: "Enviar musica de fundo", onCreated: async (media) => { await loadMedia(); await setScreenMusic(media.id); } });
+  }
+  function chooseScreenMusic() {
+    const sc = screen(); if (!sc) { toast({ kind: "warn", msg: "Selecione uma tela primeiro." }); return; }
+    const audios = state.media.filter((m) => m.type === "audio");
+    if (!audios.length) { uploadScreenMusic(); return; }
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.music + '</span><span class="modal-title">Musica de fundo da tela</span></div>' +
+      '<div class="modal-body"><div class="field"><label>Escolher audio da biblioteca</label><select id="bm-sel">' + audios.map((a) => '<option value="' + a.id + '"' + (String(a.id) === String(sc.background_audio_id || "") ? " selected" : "") + '>' + esc(a.name) + '</option>').join("") + '</select></div><button class="btn ghost block small" id="bm-upload">' + ICONS.upload + ' Enviar nova musica</button></div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Cancelar</button><button class="btn primary" data-ok>' + ICONS.check + ' Definir</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    modal.querySelector("#bm-upload").addEventListener("click", () => { ui.close(); uploadScreenMusic(); });
+    modal.querySelector("[data-ok]").addEventListener("click", async () => { const v = Number(modal.querySelector("#bm-sel").value); ui.close(); await setScreenMusic(v); });
+  }
+  function screenMusicField(sc) {
+    const audios = state.media.filter((m) => m.type === "audio");
+    const cur = sc.background_audio_id || "";
+    const sel = '<select id="f-bgaudio"><option value="">- sem musica -</option>' + audios.map((a) => '<option value="' + a.id + '"' + (String(a.id) === String(cur) ? " selected" : "") + '>' + esc(a.name) + '</option>').join("") + '</select>';
+    return field("Audio em loop", sel) + '<button class="btn ghost block small" data-upload-music>' + ICONS.upload + ' Enviar musica</button><span class="hint" style="display:block;margin-top:6px">Toca em loop na TV inteira enquanto o conteudo e exibido.</span>';
+  }
+
+  /** Pre-visualizacao ao vivo do player, embutida no painel (iframe 16:9). */
+  function openLivePreview(sc) {
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.eye + '</span><span class="modal-title">Pre-visualizacao ao vivo - ' + esc(sc.name) + '</span></div>' +
+      '<div class="modal-body"><div class="live-frame"><iframe src="' + playerUrl(sc.slug) + '" allow="autoplay; encrypted-media"></iframe></div><span class="hint">Espelha o player em tempo real. As mudancas aparecem automaticamente.</span></div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button><button class="btn primary" data-open>' + ICONS.eye + ' Abrir em nova aba</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    modal.querySelector("[data-open]").addEventListener("click", () => window.open(playerUrl(sc.slug), "_blank"));
+  }
+
+  /** Mini-preview visual de um layout de zonas. */
+  function layoutPreview(zones) {
+    return '<div class="layout-mini">' + zones.map((z) => '<span style="left:' + z.x + '%;top:' + z.y + '%;width:' + z.width + '%;height:' + z.height + '%"></span>').join("") + '</div>';
+  }
+
+  /** Assistente de nova tela: nome, fuso e layout inicial (1, 2 ou 3 zonas). */
+  function openScreenWizard() {
+    let chosen = "full";
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    const cards = Object.keys(SCREEN_LAYOUTS).map((k) => '<button type="button" class="layout-card" data-layout="' + k + '">' + layoutPreview(SCREEN_LAYOUTS[k].zones) + '<span>' + SCREEN_LAYOUTS[k].label + '</span></button>').join("");
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.screen + '</span><span class="modal-title">Nova tela</span></div>' +
+      '<div class="modal-body"><div class="field"><label>Nome da tela</label><input id="sw-name" value="Nova TV"/></div>' +
+      '<div class="field"><label>Fuso horario</label><input id="sw-tz" value="America/Sao_Paulo"/></div>' +
+      '<label class="mm-label">Layout inicial</label><div class="layout-grid">' + cards + '</div></div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Cancelar</button><button class="btn primary" data-create>' + ICONS.check + ' Criar tela</button></div>';
+    const ui = buildOverlay(modal);
+    const setLayout = (k) => { chosen = k; modal.querySelectorAll(".layout-card").forEach((c) => c.classList.toggle("active", c.dataset.layout === k)); };
+    modal.querySelectorAll(".layout-card").forEach((c) => c.addEventListener("click", () => setLayout(c.dataset.layout)));
+    setLayout("full");
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    modal.querySelector("[data-create]").addEventListener("click", async () => {
+      const name = modal.querySelector("#sw-name").value.trim() || "Nova TV";
+      const tz = modal.querySelector("#sw-tz").value.trim() || "America/Sao_Paulo";
+      try {
+        const created = await api("/api/screens", { method: "POST", body: JSON.stringify({ name: name, timezone: tz }) });
+        const layout = SCREEN_LAYOUTS[chosen].zones;
+        await loadScreens();
+        const fresh = state.screens.find((s) => s.id === created.id);
+        const mainZone = fresh && fresh.zones[0] ? fresh.zones[0] : null;
+        if (mainZone) {
+          const first = layout[0];
+          await api("/api/screens/" + created.id + "/zones/" + mainZone.id, { method: "PATCH", body: JSON.stringify({ name: first.name, x: first.x, y: first.y, width: first.width, height: first.height, z_index: 0 }) });
+        }
+        for (let i = 1; i < layout.length; i++) {
+          const zl = layout[i];
+          await api("/api/screens/" + created.id + "/zones", { method: "POST", body: JSON.stringify({ name: zl.name, x: zl.x, y: zl.y, width: zl.width, height: zl.height, z_index: i }) });
+        }
+        ui.close();
+        await loadScreens(); state.activeSection = "screens"; state.activeScreenId = created.id;
+        const s = screen(); state.selectedZoneId = s && s.zones[0] ? s.zones[0].id : null;
+        renderActivity(); renderAll();
+        toast({ kind: "ok", msg: "Tela criada com " + layout.length + " zona(s)." });
+      } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
+  }
+
+  function openMediaModal(opts) {
+    opts = opts || {};
     const modal = document.createElement("div");
     modal.className = "modal modal-wide";
     modal.setAttribute("role", "dialog"); modal.setAttribute("aria-modal", "true");
-    let current = "image";
+    let current = opts.presetType || "image";
     const typeBtns = Object.keys(TYPE_LABEL).map((t) => '<button class="type-pick" data-type="' + t + '">' + ICONS[TYPE_ICON[t]] + '<span>' + TYPE_LABEL[t] + '</span></button>').join("");
     const folderOpts = '<option value="">Sem pasta</option>' + state.folders.map((f) => '<option value="' + f.id + '">' + esc(f.name) + '</option>').join("");
     modal.innerHTML =
-      '<div class="modal-head"><span class="modal-ico">' + ICONS.media + '</span><span class="modal-title">Nova midia</span></div>' +
+      '<div class="modal-head"><span class="modal-ico">' + ICONS.media + '</span><span class="modal-title">' + esc(opts.title || "Nova midia") + '</span></div>' +
       '<div class="modal-body">' +
-        '<label class="mm-label">1. Tipo de conteudo</label><div class="type-grid">' + typeBtns + '</div>' +
+        (opts.lockType ? '' : '<label class="mm-label">1. Tipo de conteudo</label><div class="type-grid">' + typeBtns + '</div>') +
         '<div class="field"><label>2. Nome</label><input id="mm-name" placeholder="Ex.: Promo de inverno"/></div>' +
         '<div id="mm-dynamic"></div>' +
         '<div class="row" style="gap:10px"><div class="field grow"><label>Pasta (opcional)</label><select id="mm-folder">' + folderOpts + '</select></div><div class="field grow"><label>Tags (separadas por virgula)</label><input id="mm-tags" placeholder="promo, inverno"/></div></div>' +
@@ -710,9 +893,10 @@
     const ui = buildOverlay(modal);
     const dyn = modal.querySelector("#mm-dynamic");
     const renderDynamic = () => {
-      if (current === "image" || current === "video") {
-        const label = current === "image" ? "a imagem" : "o video";
-        dyn.innerHTML = '<label class="mm-label">3. Arquivo</label><div class="dropzone" id="mm-drop"><div class="dz-inner">' + ICONS.upload + '<p>Arraste ' + label + ' aqui ou <b>clique para escolher</b></p><span class="dz-file" id="mm-file-name">Nenhum arquivo selecionado</span></div><input type="file" id="mm-file" accept="' + (current === "image" ? "image/*" : "video/*") + '" hidden/></div>';
+      if (current === "image" || current === "video" || current === "audio") {
+        const label = current === "image" ? "a imagem" : (current === "audio" ? "o audio" : "o video");
+        const accept = current === "image" ? "image/*" : (current === "audio" ? "audio/*" : "video/*");
+        dyn.innerHTML = '<label class="mm-label">3. Arquivo</label><div class="dropzone" id="mm-drop"><div class="dz-inner">' + ICONS.upload + '<p>Arraste ' + label + ' aqui ou <b>clique para escolher</b></p><span class="dz-file" id="mm-file-name">Nenhum arquivo selecionado</span></div><input type="file" id="mm-file" accept="' + accept + '" hidden/></div>';
         const dz = modal.querySelector("#mm-drop"); const fi = modal.querySelector("#mm-file"); const fn = modal.querySelector("#mm-file-name");
         const setName = () => { fn.textContent = fi.files[0] ? fi.files[0].name : "Nenhum arquivo selecionado"; };
         dz.addEventListener("click", () => fi.click());
@@ -721,7 +905,15 @@
         ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("over"); }));
         dz.addEventListener("drop", (e) => { if (e.dataTransfer.files[0]) { fi.files = e.dataTransfer.files; setName(); } });
       } else if (current === "text" || current === "html") {
-        dyn.innerHTML = '<div class="field"><label>3. Conteudo ' + (current === "html" ? "(HTML)" : "(texto)") + '</label><textarea id="mm-value" rows="5" placeholder="' + (current === "html" ? "<h1>Ola</h1>" : "Digite o texto que aparecera na tela") + '"></textarea><span class="hint">' + (current === "html" ? "Aceita HTML simples. Evite scripts." : "Texto exibido em tela cheia na zona.") + '</span></div>';
+        const tplRow = '<label class="mm-label">Modelos prontos</label><div class="tpl-row">' + Object.keys(MEDIA_TEMPLATES).map((k) => '<button type="button" class="chip tpl-pick" data-tpl="' + k + '">' + MEDIA_TEMPLATES[k].label + '</button>').join("") + '</div>';
+        dyn.innerHTML = tplRow + '<div class="field"><label>3. Conteudo ' + (current === "html" ? "(HTML)" : "(texto)") + '</label><textarea id="mm-value" rows="6" placeholder="' + (current === "html" ? "<h1>Ola</h1>" : "Digite o texto que aparecera na tela") + '"></textarea><span class="hint">' + (current === "html" ? "Aceita HTML simples. Evite scripts." : "Texto exibido em tela cheia. Use um modelo acima para comecar.") + '</span></div>';
+        dyn.querySelectorAll(".tpl-pick").forEach((b) => b.addEventListener("click", () => {
+          const tpl = MEDIA_TEMPLATES[b.dataset.tpl];
+          const ta = modal.querySelector("#mm-value");
+          if (ta) ta.value = (current === "html" ? tpl.html : tpl.text);
+          const nm = modal.querySelector("#mm-name");
+          if (nm && !nm.value.trim()) nm.value = tpl.label;
+        }));
       } else {
         const ph = current === "youtube" ? "https://youtube.com/watch?v=..." : (current === "embed" ? "https://... (pagina ou musica para incorporar)" : "https://exemplo.com");
         const help = current === "youtube" ? "Cole o link do video do YouTube." : (current === "embed" ? "Pagina ou conteudo incorporavel." : "Pagina web que sera exibida.");
@@ -730,7 +922,7 @@
     };
     const setType = (t) => { current = t; modal.querySelectorAll(".type-pick").forEach((b) => b.classList.toggle("active", b.dataset.type === t)); renderDynamic(); };
     modal.querySelectorAll(".type-pick").forEach((b) => b.addEventListener("click", () => setType(b.dataset.type)));
-    setType("image");
+    setType(current);
     modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
     modal.querySelector("[data-create]").addEventListener("click", async () => {
       const name = modal.querySelector("#mm-name").value.trim();
@@ -738,21 +930,23 @@
       const folderId = modal.querySelector("#mm-folder").value;
       const tags = modal.querySelector("#mm-tags").value;
       try {
-        if (current === "image" || current === "video") {
+        let created;
+        if (current === "image" || current === "video" || current === "audio") {
           const file = modal.querySelector("#mm-file").files[0];
           if (!file) { toast({ kind: "warn", msg: "Selecione um arquivo." }); return; }
           const fd = new FormData(); fd.append("name", name); fd.append("file", file);
           if (folderId) fd.append("folder_id", folderId);
           if (tags.trim()) fd.append("tags", tags);
-          await api("/api/media/upload", { method: "POST", body: fd });
+          created = await api("/api/media/upload", { method: "POST", body: fd });
         } else {
           const value = modal.querySelector("#mm-value").value;
           const body = { name, type: current, tags: tags.split(",").map((s) => s.trim()).filter(Boolean) };
           if (folderId) body.folder_id = Number(folderId);
           if (current === "url" || current === "youtube" || current === "embed") body.source_url = value; else body.content = value;
-          await api("/api/media", { method: "POST", body: JSON.stringify(body) });
+          created = await api("/api/media", { method: "POST", body: JSON.stringify(body) });
         }
-        ui.close(); await loadMedia(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: "Midia adicionada." });
+        ui.close(); await loadMedia(); renderSidebar(); renderDoc();
+        if (opts.onCreated) { await opts.onCreated(created); } else { toast({ kind: "ok", msg: "Midia adicionada." }); }
       } catch (err) { toast({ kind: "err", msg: err.message }); }
     });
     setTimeout(() => { const n = modal.querySelector("#mm-name"); if (n) n.focus(); }, 40);
@@ -805,7 +999,7 @@
     let valField = "";
     if (m.type === "text" || m.type === "html") valField = field("Conteudo", '<textarea id="mi-content" rows="4">' + esc(m.content || "") + '</textarea>');
     else if (m.type === "url" || m.type === "youtube" || m.type === "embed") valField = field("URL de origem", '<input id="mi-url" value="' + esc(m.source_url || "") + '"/>');
-    else valField = field("Arquivo atual", '<div class="code">' + esc(m.path || "-") + '</div>') + '<div class="field"><label>Substituir arquivo</label><input type="file" id="mi-file" accept="' + (m.type === "image" ? "image/*" : "video/*") + '"/></div>';
+    else { const isAV = (m.type === "image" || m.type === "video"); valField = field("Arquivo atual", '<div class="code">' + esc(m.path || "-") + '</div>') + (isAV ? '<div class="field"><label>Substituir arquivo</label><input type="file" id="mi-file" accept="' + (m.type === "image" ? "image/*" : "video/*") + '"/></div>' : ''); }
     const folderOpts = '<option value="">Sem pasta</option>' + state.folders.map((f) => '<option value="' + f.id + '"' + (m.folder_id === f.id ? " selected" : "") + '>' + esc(f.name) + '</option>').join("");
     return '<div class="insp-head">' + ICONS[TYPE_ICON[m.type]] + '<span>' + esc(m.name) + '</span></div><div class="insp-section"><h5>' + TYPE_LABEL[m.type] + '</h5>' +
       field("Nome", '<input id="mi-name" value="' + esc(m.name) + '"/>') + valField +
@@ -1119,10 +1313,11 @@
     });
     document.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); if ($("login").classList.contains("hidden")) { $("palette").hidden ? openPalette() : closePalette(); } }
-      else if (e.key === "Escape") { closePalette(); closeMenu(); }
+      else if (e.key === "Escape") { closePalette(); closeMenu(); closeZoneQuickMenu(); }
     });
     // Fecha os menus suspensos ao clicar em qualquer lugar fora deles.
     document.addEventListener("click", (e) => { if (openMenuIndex !== null && !e.target.closest(".menu-group")) closeMenu(); });
+    document.addEventListener("click", (e) => { if (!e.target.closest("#zone-ctx")) closeZoneQuickMenu(); });
 
     if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 

@@ -49,6 +49,7 @@ class MediaType(str, enum.Enum):
     url = "url"
     youtube = "youtube"
     embed = "embed"
+    audio = "audio"
 
 
 class FitMode(str, enum.Enum):
@@ -218,6 +219,10 @@ class Screen(Base):
     )
     last_seen: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    # Musica de fundo (midia tipo 'audio') tocada em loop no nivel da tela.
+    background_audio_id: Mapped[int | None] = mapped_column(
+        ForeignKey("media.id", ondelete="SET NULL"), nullable=True
     )
 
     zones: Mapped[list["Zone"]] = relationship(
