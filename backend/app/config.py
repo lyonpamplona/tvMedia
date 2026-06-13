@@ -84,6 +84,22 @@ class Settings:
         )
 
         self.max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "200"))
+
+        # Processamento de midia (reescala/transcodificacao) server-side.
+        # Requer Pillow (imagens) e ffmpeg/ffprobe no PATH (videos). Quando as
+        # ferramentas nao estao disponiveis, o processamento e ignorado com
+        # seguranca (status 'skipped') e o arquivo original e servido.
+        self.media_processing_enabled: bool = _env_bool(
+            "MEDIA_PROCESSING_ENABLED", True
+        )
+        self.image_max_dimension: int = int(os.getenv("IMAGE_MAX_DIMENSION", "3840"))
+        self.image_quality: int = int(os.getenv("IMAGE_QUALITY", "82"))
+        self.video_max_height: int = int(os.getenv("VIDEO_MAX_HEIGHT", "1080"))
+        self.video_crf: int = int(os.getenv("VIDEO_CRF", "23"))
+        self.video_preset: str = os.getenv("VIDEO_PRESET", "veryfast")
+        self.media_process_timeout: int = int(
+            os.getenv("MEDIA_PROCESS_TIMEOUT", "1800")
+        )
         self.cors_origins: list[str] = [
             origin.strip()
             for origin in os.getenv("CORS_ORIGINS", "*").split(",")

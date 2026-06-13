@@ -526,3 +526,8 @@ kbd {
 /* ---- v18: modo quiosque (QR code) ---- */
 .qr-box { display:inline-block; padding:12px; background:#fff; border-radius:12px; margin:6px 0 12px; box-shadow:0 6px 18px rgba(0,0,0,.35); }
 .qr-box img { display:block; width:240px; height:240px; }
+
+/* Status de processamento de midia (Fase 2) */
+.tag.proc-ok{background:#13301f;color:#86efac;border-color:#235236}
+.tag.proc-warn{background:#332b14;color:#fcd34d;border-color:#54481f}
+.tag.proc-err{background:#331a1f;color:#fca5a5;border-color:#542931}

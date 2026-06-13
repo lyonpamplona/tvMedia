@@ -316,6 +316,7 @@
       case "video": {
         const video = document.createElement("video");
         video.src = item.url;
+        if (item.poster) video.poster = item.poster;
         video.autoplay = true;
         video.muted = item.muted !== false;  // som conforme configuração do item
         video.playsInline = true;
