@@ -705,6 +705,9 @@ def create_screen(
         timezone=data.timezone,
         company_id=company_id,
         sync_group=data.sync_group,
+        resolution=data.resolution,
+        orientation=data.orientation or "landscape",
+        size_inches=data.size_inches,
     )
     db.add(screen)
     db.commit()
@@ -725,6 +728,12 @@ def update_screen(
         screen.timezone = data.timezone
     if "sync_group" in data.model_fields_set:
         screen.sync_group = data.sync_group
+    if "resolution" in data.model_fields_set:
+        screen.resolution = data.resolution
+    if "orientation" in data.model_fields_set and data.orientation:
+        screen.orientation = data.orientation
+    if "size_inches" in data.model_fields_set:
+        screen.size_inches = data.size_inches
     if "background_audio_id" in data.model_fields_set:
         screen.background_audio_id = data.background_audio_id
     db.commit()
