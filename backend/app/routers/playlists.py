@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
-from ..auth import require_auth
+from ..auth import Scope, get_scope, require_auth
 from ..database import get_db
 from ..realtime import notify_all_screens, notify_playlist_screens
 
@@ -40,9 +40,11 @@ def _get_item_or_404(
 
 
 @router.get("", response_model=list[schemas.PlaylistRead])
-def list_playlists(db: Session = Depends(get_db)) -> list[models.Playlist]:
-    """Lista todas as playlists com seus itens."""
-    return crud.list_playlists(db)
+def list_playlists(
+    db: Session = Depends(get_db), scope: Scope = Depends(get_scope)
+) -> list[models.Playlist]:
+    """Lista as playlists da empresa em foco com seus itens."""
+    return crud.list_playlists(db, company_id=scope.company_id)
 
 
 @router.get("/{playlist_id}", response_model=schemas.PlaylistRead)
@@ -53,10 +55,12 @@ def get_playlist(playlist_id: int, db: Session = Depends(get_db)) -> models.Play
 
 @router.post("", response_model=schemas.PlaylistRead, status_code=201)
 def create_playlist(
-    data: schemas.PlaylistCreate, db: Session = Depends(get_db)
+    data: schemas.PlaylistCreate,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ) -> models.Playlist:
-    """Cria uma playlist vazia."""
-    return crud.create_playlist(db, data)
+    """Cria uma playlist vazia na empresa em foco."""
+    return crud.create_playlist(db, data, company_id=scope.write_company_id)
 
 
 @router.patch("/{playlist_id}", response_model=schemas.PlaylistRead)

@@ -1,19 +1,19 @@
 """Modelos ORM (SQLAlchemy) do tvMedia.
 
-Domínio:
+Dominio multi-empresa (multi-tenant):
 
-* :class:`User` — operador do painel, com papel (role) e versionamento de token
-  para permitir revogação de sessões.
-* :class:`MediaFolder` — pasta para organizar mídias (hierarquia opcional).
-* :class:`Media` — recurso exibível (imagem, vídeo, texto, HTML, URL, embed),
-  com pasta e tags opcionais.
-* :class:`Playlist` / :class:`PlaylistItem` — sequência ordenada de itens.
-* :class:`Screen` — uma TV identificada por ``slug`` único.
-* :class:`Zone` — região retangular (em %) de uma tela, com playlist padrão.
-* :class:`Schedule` — regra de agendamento por dia/hora e, opcionalmente, por
-  faixa de datas (campanhas).
-* :class:`AuditLog` — trilha de auditoria das alterações administrativas.
-* :class:`PlayEvent` — registro de reprodução (proof-of-play).
+* :class:`Company` — empresa/cliente (tenant). Cada empresa tem marca propria
+  (nome, logo, cor) e isola seus usuarios, midias, playlists e telas.
+* :class:`User` — operador do painel, vinculado a uma empresa, com papel (role),
+  flag de super admin (controle global) e versionamento de token para revogacao.
+* :class:`MediaFolder` / :class:`Media` — biblioteca de conteudo da empresa.
+* :class:`Playlist` / :class:`PlaylistItem` — sequencia ordenada de itens.
+* :class:`Screen` — uma TV identificada por ``slug`` unico, com codigo de
+  emparelhamento e grupo de sincronia opcional.
+* :class:`Zone` — regiao retangular (em %) de uma tela, com playlist padrao.
+* :class:`Schedule` — regra de agendamento por dia/hora e faixa de datas.
+* :class:`AuditLog` — trilha de auditoria das alteracoes administrativas.
+* :class:`PlayEvent` — registro de reproducao (proof-of-play).
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ from .database import Base
 
 
 class MediaType(str, enum.Enum):
-    """Tipos de mídia suportados pelo player."""
+    """Tipos de midia suportados pelo player."""
 
     image = "image"
     video = "video"
@@ -50,10 +50,14 @@ class MediaType(str, enum.Enum):
     youtube = "youtube"
     embed = "embed"
     audio = "audio"
+    clock = "clock"
+    weather = "weather"
+    news = "news"
+    promo = "promo"
 
 
 class FitMode(str, enum.Enum):
-    """Modo de ajuste do conteúdo à área da zona (mapeia para object-fit)."""
+    """Modo de ajuste do conteudo a area da zona (mapeia para object-fit)."""
 
     contain = "contain"
     cover = "cover"
@@ -61,7 +65,7 @@ class FitMode(str, enum.Enum):
 
 
 class Transition(str, enum.Enum):
-    """Efeito de transição entre itens consecutivos."""
+    """Efeito de transicao entre itens consecutivos."""
 
     none = "none"
     fade = "fade"
@@ -69,10 +73,10 @@ class Transition(str, enum.Enum):
 
 
 class UserRole(str, enum.Enum):
-    """Papéis de acesso do painel.
+    """Papeis de acesso do painel.
 
-    * ``admin`` — acesso total, incluindo gestão de usuários.
-    * ``editor`` — gerencia mídia/playlists/telas, sem gestão de usuários.
+    * ``admin`` — acesso total dentro da empresa, incluindo gestao de usuarios.
+    * ``editor`` — gerencia midia/playlists/telas, sem gestao de usuarios.
     * ``viewer`` — somente leitura.
     """
 
@@ -86,11 +90,43 @@ def _generate_slug() -> str:
     return secrets.token_urlsafe(8)
 
 
-class User(Base):
-    """Operador do painel administrativo.
+def _generate_company_slug() -> str:
+    """Gera um identificador curto para empresas."""
+    return secrets.token_urlsafe(6)
 
-    ``token_version`` é incluído no token de sessão; incrementar o valor
-    invalida imediatamente todos os tokens emitidos (logout global/revogação).
+
+def _generate_pair_code() -> str:
+    """Gera um codigo numerico de 6 digitos para emparelhar uma TV."""
+    return f"{secrets.randbelow(1000000):06d}"
+
+
+class Company(Base):
+    """Empresa/cliente (tenant) com marca propria e dados isolados."""
+
+    __tablename__ = "companies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    slug: Mapped[str] = mapped_column(
+        String(32), unique=True, index=True, default=_generate_company_slug
+    )
+    # Caminho relativo (em media_dir) do logo enviado, se houver.
+    logo_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Cor de destaque da marca (hex, ex.: '#7aa2f7').
+    primary_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class User(Base):
+    """Operador do painel administrativo, vinculado a uma empresa.
+
+    ``token_version`` e incluido no token de sessao; incrementar o valor
+    invalida imediatamente todos os tokens emitidos (logout global/revogacao).
+    ``is_super_admin`` concede controle global (gestao de empresas e acesso ao
+    conteudo de qualquer empresa), independentemente da empresa de origem.
     """
 
     __tablename__ = "users"
@@ -103,6 +139,12 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole), nullable=False, default=UserRole.editor
     )
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    is_super_admin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
@@ -112,9 +154,11 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    company: Mapped["Company | None"] = relationship()
+
 
 class MediaFolder(Base):
-    """Pasta para organizar mídias, com hierarquia opcional."""
+    """Pasta para organizar midias, com hierarquia opcional."""
 
     __tablename__ = "media_folders"
 
@@ -123,13 +167,16 @@ class MediaFolder(Base):
     parent_id: Mapped[int | None] = mapped_column(
         ForeignKey("media_folders.id", ondelete="SET NULL"), nullable=True
     )
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
 
 class Media(Base):
-    """Representa um conteúdo exibível na tela."""
+    """Representa um conteudo exibivel na tela."""
 
     __tablename__ = "media"
 
@@ -139,10 +186,13 @@ class Media(Base):
     path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     source_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Tags livres separadas por vírgula (ex.: "promo,verao").
+    # Tags livres separadas por virgula (ex.: "promo,verao").
     tags: Mapped[str | None] = mapped_column(String(512), nullable=True)
     folder_id: Mapped[int | None] = mapped_column(
         ForeignKey("media_folders.id", ondelete="SET NULL"), nullable=True
+    )
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -155,12 +205,15 @@ class Media(Base):
 
 
 class Playlist(Base):
-    """Sequência ordenada de itens de mídia exibidos em loop."""
+    """Sequencia ordenada de itens de midia exibidos em loop."""
 
     __tablename__ = "playlists"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -176,7 +229,7 @@ class Playlist(Base):
 
 
 class PlaylistItem(Base):
-    """Associa uma mídia a uma playlist com ordem, duração, ajuste e transição."""
+    """Associa uma midia a uma playlist com ordem, duracao, ajuste e transicao."""
 
     __tablename__ = "playlist_items"
 
@@ -202,7 +255,7 @@ class PlaylistItem(Base):
 
 
 class Screen(Base):
-    """Uma TV/tela física que reproduz uma ou mais zonas."""
+    """Uma TV/tela fisica que reproduz uma ou mais zonas."""
 
     __tablename__ = "screens"
 
@@ -210,6 +263,15 @@ class Screen(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(
         String(32), unique=True, index=True, default=_generate_slug
+    )
+    # Codigo curto (6 digitos) para emparelhar uma TV nova sem digitar o slug.
+    pair_code: Mapped[str | None] = mapped_column(
+        String(12), unique=True, index=True, default=_generate_pair_code
+    )
+    # Grupo de sincronia: telas no mesmo grupo recarregam juntas (parque de TVs).
+    sync_group: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
     )
     timezone: Mapped[str] = mapped_column(
         String(64), nullable=False, default="America/Sao_Paulo"
@@ -233,7 +295,7 @@ class Screen(Base):
 
 
 class Zone(Base):
-    """Região retangular de uma tela, com playlist e agendamentos próprios."""
+    """Regiao retangular de uma tela, com playlist e agendamentos proprios."""
 
     __tablename__ = "zones"
 
@@ -263,10 +325,10 @@ class Zone(Base):
 class Schedule(Base):
     """Regra de agendamento de playlist para uma zona.
 
-    Vale nos dias da semana em ``days_of_week`` (CSV de inteiros, 0=segunda …
-    6=domingo) e na faixa de horário ``start_minute``–``end_minute`` (minutos
+    Vale nos dias da semana em ``days_of_week`` (CSV de inteiros, 0=segunda ...
+    6=domingo) e na faixa de horario ``start_minute``-``end_minute`` (minutos
     desde a meia-noite). Opcionalmente limita-se a uma faixa de datas
-    (``start_date``/``end_date``) para campanhas. Em sobreposição, vence a
+    (``start_date``/``end_date``) para campanhas. Em sobreposicao, vence a
     maior ``priority``.
     """
 
@@ -294,7 +356,7 @@ class Schedule(Base):
 
 
 class AuditLog(Base):
-    """Trilha de auditoria de ações administrativas."""
+    """Trilha de auditoria de acoes administrativas."""
 
     __tablename__ = "audit_logs"
 
@@ -303,6 +365,9 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(64), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
     entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
@@ -310,12 +375,15 @@ class AuditLog(Base):
 
 
 class PlayEvent(Base):
-    """Registro de reprodução de uma mídia em uma tela (proof-of-play)."""
+    """Registro de reproducao de uma midia em uma tela (proof-of-play)."""
 
     __tablename__ = "play_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     screen_slug: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     zone_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     media_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     media_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")

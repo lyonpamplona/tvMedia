@@ -83,8 +83,15 @@ def login(
         db, actor=user.username, action="login", entity_type="user", entity_id=user.id
     )
     token, expires_in = create_token(user)
+    company = crud.get_company(db, user.company_id) if user.company_id else None
     return schemas.TokenResponse(
-        token=token, expires_in=expires_in, username=user.username, role=user.role
+        token=token,
+        expires_in=expires_in,
+        username=user.username,
+        role=user.role,
+        is_super_admin=user.is_super_admin,
+        company_id=user.company_id,
+        company_name=company.name if company else None,
     )
 
 

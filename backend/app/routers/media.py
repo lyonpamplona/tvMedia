@@ -30,7 +30,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
-from ..auth import require_auth
+from ..auth import Scope, get_scope, require_auth
 from ..config import settings
 from ..database import get_db
 from ..realtime import notify_all_screens
@@ -68,10 +68,11 @@ def list_media(
     limit: int | None = Query(None, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ) -> list[models.Media]:
-    """Lista mídias. Sem filtros/paginação, retorna todas (compatível)."""
+    """Lista mídias da empresa em foco. Sem filtros, retorna todas dela."""
     if folder_id is None and tag is None and q is None and limit is None:
-        return crud.list_media(db)
+        return crud.list_media(db, company_id=scope.company_id)
     rows, _ = crud.list_media_paginated(
         db,
         limit=limit or 50,
@@ -79,6 +80,7 @@ def list_media(
         folder_id=folder_id,
         tag=tag,
         search=q,
+        company_id=scope.company_id,
     )
     return rows
 
@@ -91,10 +93,12 @@ def list_media_page(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ) -> schemas.Page[schemas.MediaRead]:
     """Versão paginada da listagem (total + itens da página)."""
     rows, total = crud.list_media_paginated(
-        db, limit=limit, offset=offset, folder_id=folder_id, tag=tag, search=q
+        db, limit=limit, offset=offset, folder_id=folder_id, tag=tag, search=q,
+        company_id=scope.company_id,
     )
     items = [schemas.MediaRead.model_validate(row) for row in rows]
     return schemas.Page[schemas.MediaRead](
@@ -104,7 +108,9 @@ def list_media_page(
 
 @router.post("", response_model=schemas.MediaRead, status_code=status.HTTP_201_CREATED)
 async def create_media(
-    data: schemas.MediaCreate, db: Session = Depends(get_db)
+    data: schemas.MediaCreate,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ) -> models.Media:
     """Cria uma mídia sem upload (texto, HTML, URL, embed, youtube)."""
     if data.type in (
@@ -125,6 +131,7 @@ async def create_media(
         content=data.content,
         tags=data.tags,
         folder_id=data.folder_id,
+        company_id=scope.write_company_id,
     )
     await notify_all_screens(db, reason="media-created")
     return media
@@ -132,7 +139,9 @@ async def create_media(
 
 @router.post("/bulk", response_model=list[schemas.MediaRead], status_code=201)
 async def bulk_create_media(
-    data: schemas.BulkUrlRequest, db: Session = Depends(get_db)
+    data: schemas.BulkUrlRequest,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ) -> list[models.Media]:
     """Importa várias mídias sem arquivo de uma só vez.
 
@@ -160,6 +169,7 @@ async def bulk_create_media(
                 content=item.content,
                 tags=item.tags,
                 folder_id=item.folder_id,
+                company_id=scope.write_company_id,
             )
         )
     if created:
@@ -176,6 +186,7 @@ async def upload_media(
     folder_id: int | None = Form(None),
     tags: str | None = Form(None),
     db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ) -> models.Media:
     """Recebe um arquivo (imagem/vídeo), valida, salva e registra a mídia.
 

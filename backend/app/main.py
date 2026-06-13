@@ -31,6 +31,7 @@ from .routers import (
     analytics,
     audit,
     auth,
+    companies,
     display,
     folders,
     media,
@@ -59,6 +60,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     init_db()
     with SessionLocal() as db:
+        # Garante a empresa padrão "Matriz" e migra dados antigos sem empresa.
+        default_company = crud.seed_default_company(db)
+        crud.backfill_company(db, default_company.id)
         admin = crud.seed_admin(db)
         if admin is not None:
             logger.warning(
@@ -100,6 +104,9 @@ app.add_middleware(
 
 # Roteadores da API.
 app.include_router(auth.router)
+app.include_router(companies.router)
+app.include_router(companies.branding_router)
+app.include_router(companies.templates_router)
 app.include_router(users.router)
 app.include_router(media.router)
 app.include_router(folders.router)
