@@ -627,6 +627,7 @@ def add_playlist_item(
         focal=data.focal,
         transition=data.transition,
         muted=data.muted,
+        play_full=data.play_full,
     )
     db.add(item)
     db.commit()
@@ -649,6 +650,8 @@ def update_playlist_item(
         item.transition = data.transition
     if data.muted is not None:
         item.muted = data.muted
+    if data.play_full is not None:
+        item.play_full = data.play_full
     db.commit()
     return get_playlist(db, item.playlist_id)
 

@@ -63,7 +63,7 @@ def build_zone_payload(
     if playlist is not None:
         for item in sorted(playlist.items, key=lambda i: i.position):
             if item.media.type in (models.MediaType.youtube, models.MediaType.embed):
-                resolved_url = build_embed_url(item.media, muted=item.muted)
+                resolved_url = build_embed_url(item.media, muted=item.muted, play_full=getattr(item, "play_full", False))
             else:
                 resolved_url = media_url(base_url, item.media)
             poster_url = None
@@ -79,6 +79,7 @@ def build_zone_payload(
                     focal=getattr(item, "focal", "center") or "center",
                     transition=item.transition,
                     muted=item.muted,
+                    play_full=getattr(item, "play_full", False),
                     url=resolved_url,
                     poster=poster_url,
                     content=item.media.content,

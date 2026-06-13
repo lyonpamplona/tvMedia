@@ -572,6 +572,17 @@
 
   function bindZoneInteractions() {
     const stage = $("stage");
+    if (!stage.dataset.ctxBound) {
+      stage.dataset.ctxBound = "1";
+      stage.addEventListener("contextmenu", (e) => {
+        if (e.target.closest("[data-zone]")) return;
+        e.preventDefault();
+        const rect = stage.getBoundingClientRect();
+        const px = clamp(Math.round(((e.clientX - rect.left) / rect.width) * 100), 0, 95);
+        const py = clamp(Math.round(((e.clientY - rect.top) / rect.height) * 100), 0, 95);
+        openStageMenu(e.clientX, e.clientY, px, py);
+      });
+    }
     stage.querySelectorAll("[data-zone]").forEach((el) => {
       el.addEventListener("pointerdown", (e) => {
         if (e.target.closest("[data-resize]")) return;
@@ -593,21 +604,49 @@
   function zoneOf(id) { return screen().zones.find((z) => z.id === id); }
   function markSelected() { const stage = $("stage"); if (!stage) return; stage.querySelectorAll("[data-zone]").forEach((el) => el.classList.toggle("selected", Number(el.dataset.zone) === state.selectedZoneId)); }
 
+  function nearestSnap(v, targets, thr) { let best = null, bd = thr; for (const t of targets) { const d = Math.abs(v - t); if (d <= bd) { bd = d; best = t; } } return best; }
+  function clearGuides() { const st = $("stage"); if (!st) return; st.querySelectorAll(".snap-guide").forEach((g) => g.remove()); }
+  function drawGuides(vs, hs) {
+    const st = $("stage"); if (!st) return; clearGuides();
+    vs.forEach((v) => { const g = document.createElement("div"); g.className = "snap-guide snap-v"; g.style.left = v + "%"; st.appendChild(g); });
+    hs.forEach((v) => { const g = document.createElement("div"); g.className = "snap-guide snap-h"; g.style.top = v + "%"; st.appendChild(g); });
+  }
   function startDrag(e, z, mode) {
     e.preventDefault();
     isDragging = true;
     const rect = $("stage").getBoundingClientRect();
     const sx = e.clientX, sy = e.clientY;
     const o = { x: z.x, y: z.y, w: z.width, h: z.height };
+    const SNAP = 1.6;
+    const sc = screen();
+    const others = sc ? sc.zones.filter((zz) => zz.id !== z.id) : [];
+    const xT = [0, 50, 100]; const yT = [0, 50, 100];
+    others.forEach((zz) => { xT.push(zz.x, zz.x + zz.width, zz.x + zz.width / 2); yT.push(zz.y, zz.y + zz.height, zz.y + zz.height / 2); });
     const move = (ev) => {
       const dx = ((ev.clientX - sx) / rect.width) * 100;
       const dy = ((ev.clientY - sy) / rect.height) * 100;
-      if (mode === "move") { z.x = clamp(Math.round(o.x + dx), 0, 100 - z.width); z.y = clamp(Math.round(o.y + dy), 0, 100 - z.height); }
-      else { z.width = clamp(Math.round(o.w + dx), 5, 100 - z.x); z.height = clamp(Math.round(o.h + dy), 5, 100 - z.y); }
+      const gv = []; const gh = [];
+      if (mode === "move") {
+        let nx = clamp(Math.round(o.x + dx), 0, 100 - z.width);
+        let ny = clamp(Math.round(o.y + dy), 0, 100 - z.height);
+        const sl = nearestSnap(nx, xT, SNAP); const sr = nearestSnap(nx + z.width, xT, SNAP);
+        if (sl != null) { nx = sl; gv.push(sl); } else if (sr != null) { nx = sr - z.width; gv.push(sr); }
+        const stp = nearestSnap(ny, yT, SNAP); const sb = nearestSnap(ny + z.height, yT, SNAP);
+        if (stp != null) { ny = stp; gh.push(stp); } else if (sb != null) { ny = sb - z.height; gh.push(sb); }
+        z.x = clamp(nx, 0, 100 - z.width); z.y = clamp(ny, 0, 100 - z.height);
+      } else {
+        let nw = clamp(Math.round(o.w + dx), 5, 100 - z.x);
+        let nh = clamp(Math.round(o.h + dy), 5, 100 - z.y);
+        const sr = nearestSnap(z.x + nw, xT, SNAP); if (sr != null) { nw = sr - z.x; gv.push(sr); }
+        const sb = nearestSnap(z.y + nh, yT, SNAP); if (sb != null) { nh = sb - z.y; gh.push(sb); }
+        z.width = clamp(nw, 5, 100 - z.x); z.height = clamp(nh, 5, 100 - z.y);
+      }
+      drawGuides(gv, gh);
       applyZoneGeometry(z); syncInspectorGeometry(z);
     };
     const up = async () => {
       document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); isDragging = false;
+      clearGuides();
       try { await api("/api/screens/" + state.activeScreenId + "/zones/" + z.id, { method: "PATCH", body: JSON.stringify({ x: z.x, y: z.y, width: z.width, height: z.height }) }); renderBottom(); renderStatus(); }
       catch (err) { toast({ kind: "err", msg: err.message }); }
     };
@@ -857,8 +896,101 @@
   }
 
   /** Menu de contexto posicionado (clique direito na zona, dentro do canvas). */
+  function closeCtxPop() { const m = document.getElementById("ctx-pop"); if (m) m.remove(); }
+  function openCtxPop(x, y, items) {
+    closeCtxPop();
+    const menu = document.createElement("div");
+    menu.className = "ctx-menu";
+    menu.id = "ctx-pop";
+    menu.innerHTML = items.map((o, i) => o.sep ? '<div class="ctx-sep"></div>' : ('<button class="ctx-item' + (o.danger ? " danger" : "") + '" data-ci="' + i + '">' + (o.ic ? ICONS[o.ic] : "") + '<span>' + o.lb + '</span></button>')).join("");
+    document.body.appendChild(menu);
+    const w = 240; const h = menu.offsetHeight || 280;
+    menu.style.left = Math.min(x, window.innerWidth - w - 8) + "px";
+    menu.style.top = Math.min(y, window.innerHeight - h - 8) + "px";
+    items.forEach((o, i) => { if (o.sep || !o.fn) return; const b = menu.querySelector('[data-ci="' + i + '"]'); if (b) b.addEventListener("click", () => { closeCtxPop(); o.fn(); }); });
+    setTimeout(() => document.addEventListener("pointerdown", function onAway(ev) { if (!menu.contains(ev.target)) { closeCtxPop(); document.removeEventListener("pointerdown", onAway); } }), 0);
+  }
+  async function zoneMenuAction(zoneId, action) {
+    const sc = screen(); if (!sc) return;
+    const z = zoneOf(zoneId); if (!z) return;
+    try {
+      if (action === "rename") {
+        const name = await promptDialog({ title: "Renomear zona", message: "Novo nome da zona:", icon: "layout", defaultValue: z.name, confirmText: "Salvar" });
+        if (!name) return;
+        await api("/api/screens/" + sc.id + "/zones/" + z.id, { method: "PATCH", body: JSON.stringify({ name: name }) });
+      } else if (action === "dup") {
+        await api("/api/screens/" + sc.id + "/zones", { method: "POST", body: JSON.stringify({ name: z.name + " (copia)", x: clamp(z.x + 5, 0, 90), y: clamp(z.y + 5, 0, 90), width: z.width, height: z.height, z_index: (z.z_index || 0) + 1, default_playlist_id: z.default_playlist_id }) });
+      } else if (action === "front") {
+        const maxZ = sc.zones.reduce((m, zz) => Math.max(m, zz.z_index || 0), 0);
+        await api("/api/screens/" + sc.id + "/zones/" + z.id, { method: "PATCH", body: JSON.stringify({ z_index: maxZ + 1 }) });
+      } else if (action === "back") {
+        const minZ = sc.zones.reduce((m, zz) => Math.min(m, zz.z_index || 0), 0);
+        await api("/api/screens/" + sc.id + "/zones/" + z.id, { method: "PATCH", body: JSON.stringify({ z_index: minZ - 1 }) });
+      } else if (action === "del") {
+        const ok = await confirmDialog({ title: "Excluir zona", message: 'Excluir a zona "' + z.name + '"? Esta acao nao pode ser desfeita.', icon: "trash", confirmText: "Excluir" });
+        if (!ok) return;
+        await api("/api/screens/" + sc.id + "/zones/" + z.id, { method: "DELETE" });
+      }
+      await loadScreens(); renderAll(); toast({ kind: "ok", msg: "Zona atualizada." });
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+  function openStageMenu(x, y, px, py) {
+    const sc = screen(); if (!sc) return;
+    openCtxPop(x, y, [
+      { ic: "plus", lb: "Nova zona aqui", fn: () => createZoneAt(px, py, 40, 30, "Nova zona") },
+      { ic: "layout", lb: "Layout: 2 zonas (50/50)", fn: () => applyLayoutPreset("split2") },
+      { ic: "layout", lb: "Layout: 3 faixas", fn: () => applyLayoutPreset("rows3") },
+      { ic: "layout", lb: "Layout: principal + barra", fn: () => applyLayoutPreset("main-bar") },
+      { sep: true },
+      { ic: "tag", lb: "Rodape de ticker (promo)", fn: () => addTickerFooter(sc) },
+    ]);
+  }
+  async function createZoneAt(x, y, w, h, name) {
+    const sc = screen(); if (!sc) return;
+    try {
+      const maxZ = sc.zones.reduce((m, z) => Math.max(m, z.z_index || 0), 0);
+      await api("/api/screens/" + sc.id + "/zones", { method: "POST", body: JSON.stringify({ name: name || "Nova zona", x: clamp(x, 0, 100 - w), y: clamp(y, 0, 100 - h), width: w, height: h, z_index: maxZ + 1 }) });
+      await loadScreens(); const s2 = screen(); if (s2 && s2.zones.length) state.selectedZoneId = s2.zones[s2.zones.length - 1].id; renderAll(); toast({ kind: "ok", msg: "Zona criada." });
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+  async function applyLayoutPreset(kind) {
+    const sc = screen(); if (!sc) return;
+    let zones = [];
+    if (kind === "split2") zones = [{ name: "Esquerda", x: 0, y: 0, width: 50, height: 100 }, { name: "Direita", x: 50, y: 0, width: 50, height: 100 }];
+    else if (kind === "rows3") zones = [{ name: "Topo", x: 0, y: 0, width: 100, height: 33 }, { name: "Meio", x: 0, y: 33, width: 100, height: 34 }, { name: "Base", x: 0, y: 67, width: 100, height: 33 }];
+    else if (kind === "main-bar") zones = [{ name: "Principal", x: 0, y: 0, width: 100, height: 80 }, { name: "Barra", x: 0, y: 80, width: 100, height: 20 }];
+    if (!zones.length) return;
+    const ok = await confirmDialog({ title: "Aplicar layout", message: "Adicionar " + zones.length + " zonas deste layout a tela?", icon: "layout", confirmText: "Aplicar" });
+    if (!ok) return;
+    try {
+      let z0 = sc.zones.reduce((m, z) => Math.max(m, z.z_index || 0), 0);
+      for (const def of zones) { z0 += 1; await api("/api/screens/" + sc.id + "/zones", { method: "POST", body: JSON.stringify(Object.assign({ z_index: z0 }, def)) }); }
+      await loadScreens(); renderAll(); toast({ kind: "ok", msg: "Layout aplicado." });
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+  function bindTimeline() {
+    const pl = timelinePlaylist(); if (!pl) return;
+    document.querySelectorAll("#bottom-content [data-tl]").forEach((el) => {
+      el.addEventListener("contextmenu", (e) => { e.preventDefault(); openTimelineItemMenu(e.clientX, e.clientY, pl, el.dataset.tl); });
+      el.addEventListener("dblclick", (e) => { e.preventDefault(); openTimelineItemMenu(e.clientX, e.clientY, pl, el.dataset.tl); });
+    });
+  }
+  function openTimelineItemMenu(x, y, pl, itemId) {
+    const it = pl.items.find((i) => String(i.id) === String(itemId)); if (!it) return;
+    openCtxPop(x, y, [
+      { ic: "clock", lb: "Editar duracao (" + it.duration + "s)", fn: async () => { const v = await promptDialog({ title: "Duracao do item", message: "Tempo em segundos:", icon: "clock", defaultValue: String(it.duration), confirmText: "Salvar" }); const n = parseInt(v, 10); if (n > 0) updateItem(pl.id, it.id, { duration: n }); } },
+      { ic: "music", lb: it.muted ? "Ativar som" : "Silenciar", fn: () => updateItem(pl.id, it.id, { muted: !it.muted }) },
+      { ic: "refresh", lb: it.play_full ? "Nao tocar completo" : "Tocar completo (video/audio/YouTube)", fn: () => updateItem(pl.id, it.id, { play_full: !it.play_full }) },
+      { sep: true },
+      { ic: "up", lb: "Mover para esquerda", fn: () => moveItem(pl, it.id, -1) },
+      { ic: "down", lb: "Mover para direita", fn: () => moveItem(pl, it.id, 1) },
+      { sep: true },
+      { ic: "trash", lb: "Remover item", danger: true, fn: async () => { try { await api("/api/playlists/" + pl.id + "/items/" + it.id, { method: "DELETE" }); await loadPlaylists(); renderSidebar(); renderDoc(); renderBottom(); } catch (err) { toast({ kind: "err", msg: err.message }); } } },
+    ]);
+  }
   function openZoneQuickMenu(x, y, zoneId) {
     closeZoneQuickMenu();
+    const z = zoneOf(zoneId);
     const opts = [
       { k: "text", ic: "text", lb: "Criar texto" },
       { k: "image", ic: "image", lb: "Anexar foto" },
@@ -874,12 +1006,20 @@
     const menu = document.createElement("div");
     menu.className = "ctx-menu";
     menu.id = "zone-ctx";
-    menu.innerHTML = opts.map((o) => '<button class="ctx-item" data-qa="' + o.k + '">' + ICONS[o.ic] + '<span>' + o.lb + '</span></button>').join("");
+    menu.innerHTML = '<div class="ctx-head">' + ICONS.layout + '<span>' + esc(z ? z.name : "Zona") + '</span></div>'
+      + opts.map((o) => '<button class="ctx-item" data-qa="' + o.k + '">' + ICONS[o.ic] + '<span>' + o.lb + '</span></button>').join("")
+      + '<div class="ctx-sep"></div>'
+      + '<button class="ctx-item" data-zm="rename">' + ICONS.text + '<span>Renomear zona</span></button>'
+      + '<button class="ctx-item" data-zm="dup">' + ICONS.copy + '<span>Duplicar zona</span></button>'
+      + '<button class="ctx-item" data-zm="front">' + ICONS.up + '<span>Trazer para frente</span></button>'
+      + '<button class="ctx-item" data-zm="back">' + ICONS.down + '<span>Enviar para tras</span></button>'
+      + '<button class="ctx-item danger" data-zm="del">' + ICONS.trash + '<span>Excluir zona</span></button>';
     document.body.appendChild(menu);
-    const w = 230; const h = menu.offsetHeight || 280;
+    const w = 240; const h = menu.offsetHeight || 280;
     menu.style.left = Math.min(x, window.innerWidth - w - 8) + "px";
     menu.style.top = Math.min(y, window.innerHeight - h - 8) + "px";
     menu.querySelectorAll("[data-qa]").forEach((b) => b.addEventListener("click", () => { const k = b.dataset.qa; closeZoneQuickMenu(); quickAddToZone(zoneId, k); }));
+    menu.querySelectorAll("[data-zm]").forEach((b) => b.addEventListener("click", () => { const a = b.dataset.zm; closeZoneQuickMenu(); zoneMenuAction(zoneId, a); }));
   }
   function closeZoneQuickMenu() { const m = document.getElementById("zone-ctx"); if (m) m.remove(); }
 
@@ -1280,7 +1420,7 @@
   // ---- v18: formularios e leitura de config dos widgets dinamicos ---- //
   function widgetFormHtml(t) {
     if (t === "clock") return '<div class="field"><label>3. Titulo (opcional)</label><input id="wf-title" placeholder="Ex.: Agora"/></div><div class="row" style="gap:10px"><div class="field grow"><label>Formato</label><select id="wf-format"><option value="24h">24 horas</option><option value="12h">12 horas (AM/PM)</option></select></div><div class="field grow"><label>Mostrar data</label><select id="wf-showdate"><option value="1">Sim</option><option value="0">Nao</option></select></div></div><span class="hint">Relogio atualizado em tempo real no fuso da TV.</span>';
-    if (t === "weather") return '<div class="field"><label>3. Cidade</label><input id="wf-city" placeholder="Ex.: Sao Paulo"/></div><div class="field"><label>Titulo (opcional)</label><input id="wf-title" placeholder="Padrao: nome da cidade"/></div><span class="hint">Dados automaticos via open-meteo (sem chave). Atualiza a cada 10 min.</span>';
+    if (t === "weather") return '<div class="field"><label>3. Cidade</label><input id="wf-city" placeholder="Ex.: Sao Paulo"/></div><div class="field"><label>Titulo (opcional)</label><input id="wf-title" placeholder="Padrao: nome da cidade"/></div><div class="row" style="gap:10px"><div class="field grow"><label>Latitude (opcional)</label><input id="wf-lat" placeholder="Ex.: -23.55"/></div><div class="field grow"><label>Longitude (opcional)</label><input id="wf-lon" placeholder="Ex.: -46.63"/></div></div><span class="hint">Dados automaticos via open-meteo (sem chave). Atualiza a cada 10 min. Informe latitude/longitude para uma localizacao exata (sobrepoe a cidade).</span>';
     if (t === "news") return '<div class="field"><label>3. Feeds RSS (um por linha)</label><textarea id="wf-feeds" rows="3" placeholder="https://g1.globo.com/rss/g1/"></textarea></div><div class="field"><label>Mensagens manuais (uma por linha, opcional)</label><textarea id="wf-messages" rows="3" placeholder="Bem-vindo!"></textarea></div><div class="row" style="gap:10px"><div class="field grow"><label>Titulo</label><input id="wf-title" placeholder="Noticias"/></div><div class="field grow"><label>Velocidade (s)</label><input id="wf-speed" type="number" value="60"/></div></div><span class="hint">As manchetes dos feeds sao buscadas pelo servidor e combinadas com suas mensagens.</span>';
     return '<div class="field"><label>3. Produtos (um por linha: Nome | preco | obs)</label><textarea id="wf-products" rows="5" placeholder="Pizza grande | R$ 49,90 | ate sexta"></textarea></div><div class="row" style="gap:10px"><div class="field grow"><label>Titulo</label><input id="wf-title" placeholder="Promocoes"/></div><div class="field grow"><label>Velocidade (s)</label><input id="wf-speed" type="number" value="50"/></div></div><span class="hint">Faixa deslizante (vermelha), ideal no rodape da zona.</span>';
   }
@@ -1289,7 +1429,7 @@
     const lines = (id) => (val(id) || "").split("\n").map((s) => s.trim()).filter(Boolean);
     const title = (val("#wf-title") || "").trim();
     if (t === "clock") return { title: title, format: val("#wf-format") || "24h", showDate: val("#wf-showdate") !== "0" };
-    if (t === "weather") return { title: title, city: (val("#wf-city") || "").trim() || "Sao Paulo" };
+    if (t === "weather") { const cfg = { title: title, city: (val("#wf-city") || "").trim() || "Sao Paulo" }; const la = parseFloat(val("#wf-lat")); const lo = parseFloat(val("#wf-lon")); if (!isNaN(la) && !isNaN(lo)) { cfg.lat = la; cfg.lon = lo; } return cfg; }
     if (t === "news") return { title: title || "Noticias", feeds: lines("#wf-feeds"), messages: lines("#wf-messages"), speed: Number(val("#wf-speed")) || 60 };
     const products = lines("#wf-products").map((line) => { const p = line.split("|").map((s) => s.trim()); return { name: p[0] || "", price: p[1] || "", note: p[2] || "" }; });
     return { title: title || "Promocoes", products: products, speed: Number(val("#wf-speed")) || 50 };
@@ -1513,7 +1653,7 @@
     const head = '<div class="item-row row between" style="margin-bottom:12px"><strong style="font-size:14px">' + esc(pl.name) + '</strong><span class="row"><button class="btn ghost small" data-rename-pl>Renomear</button><button class="btn danger small" data-del-pl>' + ICONS.trash + ' Excluir</button></span></div>';
     const items = pl.items.length ? pl.items.map((it, i) => itemRow(pl, it, i)).join("") : '<div class="empty">Sem itens. Adicione abaixo.</div>';
     const mediaOpts = state.media.map((m) => '<option value="' + m.id + '">' + esc(m.name) + ' (' + TYPE_LABEL[m.type] + ')</option>').join("");
-    const add = '<div class="item-row row wrap" style="margin-top:12px;gap:10px"><select id="pi-media" style="flex:1;min-width:160px">' + mediaOpts + '</select><input id="pi-dur" type="number" min="1" value="10" class="mini" title="Duracao (s)"/><select id="pi-fit">' + FITS.map((f) => '<option value="' + f + '">' + FIT_LABELS[f] + '</option>').join("") + '</select><select id="pi-focal" title="Ponto focal">' + FOCALS.map((f) => '<option value="' + f + '">' + FOCAL_LABELS[f] + '</option>').join("") + '</select><select id="pi-trans">' + TRANSITIONS.map((t) => '<option>' + t + '</option>').join("") + '</select><label class="row" style="gap:5px"><input id="pi-sound" type="checkbox"/> som</label><button class="btn primary small" id="pi-add">' + ICONS.plus + ' Item</button></div>';
+    const add = '<div class="item-row row wrap" style="margin-top:12px;gap:10px"><select id="pi-media" style="flex:1;min-width:160px">' + mediaOpts + '</select><input id="pi-dur" type="number" min="1" value="10" class="mini" title="Duracao (s)"/><select id="pi-fit">' + FITS.map((f) => '<option value="' + f + '">' + FIT_LABELS[f] + '</option>').join("") + '</select><select id="pi-focal" title="Ponto focal">' + FOCALS.map((f) => '<option value="' + f + '">' + FOCAL_LABELS[f] + '</option>').join("") + '</select><select id="pi-trans">' + TRANSITIONS.map((t) => '<option>' + t + '</option>').join("") + '</select><label class="row" style="gap:5px"><input id="pi-sound" type="checkbox"/> som</label><label class="row" style="gap:5px" title="Tocar a midia inteira"><input id="pi-full" type="checkbox"/> completo</label><button class="btn primary small" id="pi-add">' + ICONS.plus + ' Item</button></div>';
     return '<div class="pl-editor">' + head + '<div class="pl-items">' + items + '</div>' + add + '</div>';
   }
   function itemRow(pl, it, i) {
@@ -1524,6 +1664,7 @@
       '<select data-it-focal="' + it.id + '" title="Ponto focal (corte)">' + FOCALS.map((f) => '<option value="' + f + '" ' + (f === (it.focal || "center") ? "selected" : "") + '>' + FOCAL_LABELS[f] + '</option>').join("") + '</select>' +
       '<select data-it-trans="' + it.id + '">' + TRANSITIONS.map((t) => '<option ' + (t === it.transition ? "selected" : "") + '>' + t + '</option>').join("") + '</select>' +
       '<label class="row" style="gap:4px" title="Som"><input type="checkbox" data-it-sound="' + it.id + '" ' + (it.muted ? "" : "checked") + '/></label>' +
+      '<label class="row" style="gap:4px" title="Tocar a midia inteira (video/audio/YouTube)"><input type="checkbox" data-it-full="' + it.id + '" ' + (it.play_full ? "checked" : "") + '/>\u25B6</label>' +
       '<button class="btn ghost small" data-it-up="' + it.id + '">' + ICONS.up + '</button><button class="btn ghost small" data-it-down="' + it.id + '">' + ICONS.down + '</button>' +
       '<button class="btn danger small" data-it-del="' + it.id + '">' + ICONS.trash + '</button></div>';
   }
@@ -1531,12 +1672,13 @@
     const doc = $("doc"); const pl = playlistById(state.openPlaylistId); if (!pl) return;
     const rn = doc.querySelector("[data-rename-pl]"); if (rn) rn.addEventListener("click", async () => { const name = await promptDialog({ title: "Renomear playlist", message: "Digite o novo nome da playlist:", icon: "playlist", defaultValue: pl.name, placeholder: "Nome da playlist", confirmText: "Salvar" }); if (!name) return; try { await api("/api/playlists/" + pl.id, { method: "PATCH", body: JSON.stringify({ name }) }); await loadPlaylists(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: "Playlist renomeada." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
     const dp = doc.querySelector("[data-del-pl]"); if (dp) dp.addEventListener("click", async () => { if (!(await confirmDialog({ title: "Excluir playlist", message: "Tem certeza que deseja excluir esta playlist?", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await api("/api/playlists/" + pl.id, { method: "DELETE" }); state.openPlaylistId = null; await loadPlaylists(); fixSelection(); renderSidebar(); renderDoc(); renderBottom(); toast({ kind: "warn", msg: "Playlist excluida." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
-    const add = $("pi-add"); if (add) add.addEventListener("click", async () => { const media_id = Number($("pi-media").value); if (!media_id) { toast({ kind: "warn", msg: "Selecione uma midia." }); return; } const body = { media_id, duration: Number($("pi-dur").value) || 10, fit: $("pi-fit").value, focal: $("pi-focal").value, transition: $("pi-trans").value, muted: !$("pi-sound").checked }; try { await api("/api/playlists/" + pl.id + "/items", { method: "POST", body: JSON.stringify(body) }); await loadPlaylists(); renderSidebar(); renderDoc(); renderBottom(); toast({ kind: "ok", msg: "Item adicionado." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+    const add = $("pi-add"); if (add) add.addEventListener("click", async () => { const media_id = Number($("pi-media").value); if (!media_id) { toast({ kind: "warn", msg: "Selecione uma midia." }); return; } const body = { media_id, duration: Number($("pi-dur").value) || 10, fit: $("pi-fit").value, focal: $("pi-focal").value, transition: $("pi-trans").value, muted: !$("pi-sound").checked, play_full: $("pi-full") ? $("pi-full").checked : false }; try { await api("/api/playlists/" + pl.id + "/items", { method: "POST", body: JSON.stringify(body) }); await loadPlaylists(); renderSidebar(); renderDoc(); renderBottom(); toast({ kind: "ok", msg: "Item adicionado." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
     doc.querySelectorAll("[data-it-dur]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itDur, { duration: Number(el.value) })));
     doc.querySelectorAll("[data-it-fit]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itFit, { fit: el.value })));
     doc.querySelectorAll("[data-it-focal]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itFocal, { focal: el.value })));
     doc.querySelectorAll("[data-it-trans]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itTrans, { transition: el.value })));
     doc.querySelectorAll("[data-it-sound]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itSound, { muted: !el.checked })));
+    doc.querySelectorAll("[data-it-full]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itFull, { play_full: el.checked })));
     doc.querySelectorAll("[data-it-del]").forEach((el) => el.addEventListener("click", async () => { try { await api("/api/playlists/" + pl.id + "/items/" + el.dataset.itDel, { method: "DELETE" }); await loadPlaylists(); renderSidebar(); renderDoc(); renderBottom(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
     doc.querySelectorAll("[data-it-up]").forEach((el) => el.addEventListener("click", () => moveItem(pl, Number(el.dataset.itUp), -1)));
     doc.querySelectorAll("[data-it-down]").forEach((el) => el.addEventListener("click", () => moveItem(pl, Number(el.dataset.itDown), 1)));
@@ -1583,7 +1725,7 @@
     $("bottom-tabs").innerHTML = BOTTOM.map((b) => '<button class="bt ' + (b.id === state.bottomTab ? "active" : "") + '" data-bt="' + b.id + '">' + ICONS[b.icon] + '<span>' + b.label + '</span>' + (b.id === "problems" && probs.length ? '<span class="badge">' + probs.length + '</span>' : "") + '</button>').join("");
     $("bottom-tabs").querySelectorAll("[data-bt]").forEach((b) => b.addEventListener("click", () => { state.bottomTab = b.dataset.bt; renderBottom(); }));
     const c = $("bottom-content");
-    if (state.bottomTab === "timeline") c.innerHTML = renderTimeline();
+    if (state.bottomTab === "timeline") { c.innerHTML = renderTimeline(); bindTimeline(); }
     else if (state.bottomTab === "logs") c.innerHTML = renderLogs();
     else c.innerHTML = renderProblems(probs);
   }
@@ -1597,7 +1739,7 @@
     if (!pl || !pl.items.length) return '<div class="empty">Selecione uma zona com playlist (ou uma playlist) para ver a linha do tempo.</div>';
     const total = pl.items.reduce((a, b) => a + b.duration, 0);
     const alts = ["", "alt", "alt2"];
-    return '<div class="timeline"><div class="track-head"><span>' + esc(pl.name) + '</span><span class="mono">ciclo total: ' + total + 's</span></div><div class="track">' + pl.items.map((it, i) => '<div class="seg ' + alts[i % 3] + '" style="flex:' + it.duration + '"><strong>' + esc(it.media.name) + '</strong><small>' + it.duration + 's - ' + it.transition + (it.muted ? " - mudo" : " - som") + '</small></div>').join("") + '</div></div>';
+    return '<div class="timeline"><div class="track-head"><span>' + esc(pl.name) + '</span><span class="mono">ciclo total: ' + total + 's</span></div><div class="track">' + pl.items.map((it, i) => '<div class="seg ' + alts[i % 3] + '" data-tl="' + it.id + '" data-tl-pl="' + pl.id + '" title="Clique direito para editar" style="flex:' + it.duration + '"><strong>' + esc(it.media.name) + '</strong><small>' + it.duration + 's - ' + it.transition + (it.muted ? " - mudo" : " - som") + (it.play_full ? " - completo" : "") + '</small></div>').join("") + '</div></div>';
   }
   function renderLogs() {
     const now = new Date();

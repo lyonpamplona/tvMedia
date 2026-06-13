@@ -531,3 +531,13 @@ kbd {
 .tag.proc-ok{background:#13301f;color:#86efac;border-color:#235236}
 .tag.proc-warn{background:#332b14;color:#fcd34d;border-color:#54481f}
 .tag.proc-err{background:#331a1f;color:#fca5a5;border-color:#542931}
+
+.ctx-menu .ctx-sep { height: 1px; background: var(--border, #2a2f45); margin: 5px 6px; }
+.ctx-menu .ctx-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px 8px; font-size: 12px; color: var(--fg, #8a93b2); }
+.ctx-menu .ctx-head svg { width: 14px; height: 14px; flex: none; }
+.ctx-item.danger { color: #f7768e; }
+.ctx-item.danger:hover { background: rgba(247,118,142,.14); color: #ff8aa0; }
+.snap-guide { position: absolute; z-index: 50; pointer-events: none; background: var(--accent, #7aa2f7); box-shadow: 0 0 4px var(--accent, #7aa2f7); }
+.snap-v { top: 0; bottom: 0; width: 1px; }
+.snap-h { left: 0; right: 0; height: 1px; }
+.seg { cursor: context-menu; }
