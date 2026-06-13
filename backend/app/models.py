@@ -114,6 +114,12 @@ class Company(Base):
     logo_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # Cor de destaque da marca (hex, ex.: '#7aa2f7').
     primary_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Mensagem de emergencia/override exibida em tela cheia em todas as telas
+    # da empresa quando ``emergency_active`` esta ligado.
+    emergency_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    emergency_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -184,6 +190,21 @@ class Media(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     type: Mapped[MediaType] = mapped_column(Enum(MediaType), nullable=False)
     path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Dimensoes originais (px) detectadas no upload (imagens/videos).
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Versao otimizada (reescala/transcodificacao) servida no lugar do
+    # original quando presente; o original permanece como backup.
+    optimized_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Poster/miniatura do video (primeiro quadro), usada como cartaz.
+    poster_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Estado do processamento server-side:
+    # pending|processing|done|skipped|failed.
+    processing_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending"
+    )
+    # Observacao do processamento (motivo de skip/falha), p/ diagnostico.
+    processing_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Tags livres separadas por virgula (ex.: "promo,verao").
@@ -245,6 +266,8 @@ class PlaylistItem(Base):
     fit: Mapped[FitMode] = mapped_column(
         Enum(FitMode), nullable=False, default=FitMode.contain
     )
+    # Ponto focal do recorte quando o ajuste e "cover".
+    focal: Mapped[str] = mapped_column(String(16), nullable=False, default="center")
     transition: Mapped[Transition] = mapped_column(
         Enum(Transition), nullable=False, default=Transition.fade
     )

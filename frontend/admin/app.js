@@ -757,6 +757,19 @@
     if (!list.length) return hint + '<div class="empty">Nada encontrado para os filtros atuais.</div>';
     return hint + '<div class="media-grid">' + list.map(mediaCard).join("") + '</div>';
   }
+  function procBadge(m) {
+    if (m.type !== "image" && m.type !== "video") return "";
+    const map = {
+      pending: ["na fila", "warn"],
+      processing: ["otimizando\u2026", "warn"],
+      done: m.optimized_path ? ["otimizada", "ok"] : ["", ""],
+      failed: ["falha", "err"],
+    };
+    const entry = map[m.processing_status || "skipped"];
+    if (!entry || !entry[0]) return "";
+    const title = m.processing_note ? ' title="' + esc(m.processing_note) + '"' : "";
+    return '<span class="tag proc-' + entry[1] + '"' + title + '>' + entry[0] + '</span>';
+  }
   function mediaCard(m) {
     let thumb;
     if (m.type === "image" && m.path) thumb = '<div class="thumb"><img src="/media/' + esc(m.path) + '" alt=""/></div>';
@@ -765,7 +778,7 @@
     const fol = m.folder_id != null ? '<span class="chip">' + ICONS.folder + esc(folderName(m.folder_id) || "?") + '</span>' : "";
     const tags = (m.tags || []).slice(0, 3).map((t) => '<span class="chip">' + esc(t) + '</span>').join("");
     const meta = (fol || tags) ? '<div class="mc-meta">' + fol + tags + '</div>' : "";
-    return '<div class="media-card' + (m.id === state.selectedMediaId ? " sel" : "") + '" data-mcard="' + m.id + '">' + thumb + '<div class="mc-body"><div class="mc-name">' + esc(m.name) + '</div>' + meta + '<div class="mc-foot"><span class="tag">' + TYPE_LABEL[m.type] + '</span>' + (m.width && m.height ? '<span class="tag" title="Resolucao">' + m.width + '\u00d7' + m.height + '</span>' : '') + '<button class="btn danger small" data-del-media="' + m.id + '">' + ICONS.trash + '</button></div></div></div>';
+    return '<div class="media-card' + (m.id === state.selectedMediaId ? " sel" : "") + '" data-mcard="' + m.id + '">' + thumb + '<div class="mc-body"><div class="mc-name">' + esc(m.name) + '</div>' + meta + '<div class="mc-foot"><span class="tag">' + TYPE_LABEL[m.type] + '</span>' + (m.width && m.height ? '<span class="tag" title="Resolucao">' + m.width + '\u00d7' + m.height + '</span>' : '') + procBadge(m) + ((m.type === "image" || m.type === "video") ? '<button class="btn ghost small" data-reproc="' + m.id + '" title="Reprocessar midia">' + ICONS.refresh + '</button>' : '') + '<button class="btn danger small" data-del-media="' + m.id + '">' + ICONS.trash + '</button></div></div></div>';
   }
   function bindMediaDoc() {
     const search = $("media-search");
@@ -780,8 +793,9 @@
   function bindMediaGrid() {
     const doc = $("doc");
     const cta = $("cta-add"); if (cta) cta.addEventListener("click", openMediaModal);
-    doc.querySelectorAll("[data-mcard]").forEach((c) => c.addEventListener("click", (e) => { if (e.target.closest("[data-del-media]")) return; state.selectedMediaId = Number(c.dataset.mcard); doc.querySelectorAll("[data-mcard]").forEach((x) => x.classList.toggle("sel", x === c)); renderSidebar(); renderInspector(); }));
+    doc.querySelectorAll("[data-mcard]").forEach((c) => c.addEventListener("click", (e) => { if (e.target.closest("[data-del-media]") || e.target.closest("[data-reproc]")) return; state.selectedMediaId = Number(c.dataset.mcard); doc.querySelectorAll("[data-mcard]").forEach((x) => x.classList.toggle("sel", x === c)); renderSidebar(); renderInspector(); }));
     doc.querySelectorAll("[data-del-media]").forEach((b) => b.addEventListener("click", async () => { if (!(await confirmDialog({ title: "Excluir midia", message: "Tem certeza que deseja excluir esta midia?", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await api("/api/media/" + b.dataset.delMedia, { method: "DELETE" }); await loadMedia(); renderSidebar(); renderDoc(); toast({ kind: "warn", msg: "Midia excluida." }); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+    doc.querySelectorAll("[data-reproc]").forEach((b) => b.addEventListener("click", async (e) => { e.stopPropagation(); try { await api("/api/media/" + b.dataset.reproc + "/process", { method: "POST" }); await loadMedia(); renderDoc(); toast({ kind: "ok", msg: "Reprocessamento enfileirado." }); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
   }
 
   // Overlay generico reutilizando as classes .modal-overlay / .modal.

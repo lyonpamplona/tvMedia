@@ -59,6 +59,8 @@ class CompanyUpdate(BaseModel):
 
     name: str | None = Field(None, min_length=2, max_length=255)
     primary_color: str | None = Field(None, max_length=16)
+    emergency_message: str | None = Field(None, max_length=2000)
+    emergency_active: bool | None = None
     is_active: bool | None = None
 
 
@@ -72,6 +74,8 @@ class CompanyRead(BaseModel):
     slug: str
     logo_path: str | None = None
     primary_color: str | None = None
+    emergency_message: str | None = None
+    emergency_active: bool = False
     is_active: bool
     created_at: datetime
 
@@ -228,6 +232,12 @@ class MediaRead(MediaBase):
 
     id: int
     path: str | None = None
+    width: int | None = None
+    height: int | None = None
+    optimized_path: str | None = None
+    poster_path: str | None = None
+    processing_status: str = "skipped"
+    processing_note: str | None = None
     created_at: datetime
 
 
@@ -260,6 +270,7 @@ class PlaylistItemCreate(BaseModel):
     duration: int = Field(10, ge=1, le=86400, description="Tempo de exibicao (s).")
     position: int | None = Field(None, description="Posicao; ao final se omitido.")
     fit: FitMode = Field(FitMode.contain, description="Modo de ajuste a zona.")
+    focal: str = Field("center", max_length=16, description="Ponto focal do recorte (cover).")
     transition: Transition = Field(Transition.fade, description="Efeito de entrada.")
     muted: bool = Field(True, description="True silencia (recomendado p/ autoplay).")
 
@@ -270,6 +281,7 @@ class PlaylistItemUpdate(BaseModel):
     duration: int | None = Field(None, ge=1, le=86400)
     position: int | None = None
     fit: FitMode | None = None
+    focal: str | None = Field(None, max_length=16)
     transition: Transition | None = None
     muted: bool | None = None
 
@@ -284,6 +296,7 @@ class PlaylistItemRead(BaseModel):
     position: int
     duration: int
     fit: FitMode
+    focal: str = "center"
     transition: Transition
     muted: bool
     media: MediaRead
@@ -536,9 +549,11 @@ class DisplayItem(BaseModel):
     duration: int
     name: str
     fit: FitMode
+    focal: str = "center"
     transition: Transition
     muted: bool = True
     url: str | None = None
+    poster: str | None = None
     content: str | None = None
 
 
@@ -563,6 +578,7 @@ class DisplayPayload(BaseModel):
     revision: str
     zones: list[DisplayZone] = []
     background_audio: str | None = None
+    emergency_message: str | None = None
 
 
 # --------------------------------------------------------------------------- #
