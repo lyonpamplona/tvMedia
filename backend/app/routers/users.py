@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
-from ..auth import require_admin
+from ..auth import Scope, get_scope, require_admin
 from ..database import get_db
 
 router = APIRouter(
@@ -19,9 +19,11 @@ router = APIRouter(
 
 
 @router.get("", response_model=list[schemas.UserRead])
-def list_users(db: Session = Depends(get_db)) -> list[models.User]:
-    """Lista todos os usuários cadastrados."""
-    return crud.list_users(db)
+def list_users(
+    db: Session = Depends(get_db), scope: Scope = Depends(get_scope)
+) -> list[models.User]:
+    """Lista usuários da empresa em foco (todas, para super admin global)."""
+    return crud.list_users(db, company_id=scope.company_id)
 
 
 @router.post("", response_model=schemas.UserRead, status_code=status.HTTP_201_CREATED)
@@ -29,8 +31,9 @@ def create_user(
     data: schemas.UserCreate,
     db: Session = Depends(get_db),
     actor: models.User = Depends(require_admin),
+    scope: Scope = Depends(get_scope),
 ) -> models.User:
-    """Cria um novo usuário.
+    """Cria um novo usuário na empresa em foco.
 
     Raises:
         HTTPException: 409 se o nome de usuário já existir.
@@ -39,7 +42,7 @@ def create_user(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Nome de usuário já existe."
         )
-    user = crud.create_user(db, data)
+    user = crud.create_user(db, data, company_id=scope.write_company_id)
     crud.record_audit(
         db,
         actor=actor.username,

@@ -1,8 +1,8 @@
-"""Esquemas Pydantic para validação de entrada e serialização de saída.
+"""Esquemas Pydantic para validacao de entrada e serializacao de saida.
 
-Convenção de sufixos: ``*Create`` (criação), ``*Update`` (atualização
-parcial) e ``*Read`` (resposta da API). Inclui o contêiner genérico
-:class:`Page` para respostas paginadas.
+Convencao de sufixos: ``*Create`` (criacao), ``*Update`` (atualizacao
+parcial) e ``*Read`` (resposta da API). Inclui o conteiner generico
+:class:`Page` para respostas paginadas e os esquemas multi-empresa.
 """
 
 from __future__ import annotations
@@ -25,52 +25,111 @@ def _split_tags(value: object) -> object:
 
 
 # --------------------------------------------------------------------------- #
-# Paginação
+# Paginacao
 # --------------------------------------------------------------------------- #
 T = TypeVar("T")
 
 
 class Page(BaseModel, Generic[T]):
-    """Contêiner genérico de resposta paginada."""
+    """Conteiner generico de resposta paginada."""
 
     total: int = Field(..., description="Total de registros que casam o filtro.")
-    limit: int = Field(..., description="Tamanho da página solicitada.")
+    limit: int = Field(..., description="Tamanho da pagina solicitada.")
     offset: int = Field(..., description="Deslocamento aplicado.")
-    items: list[T] = Field(default_factory=list, description="Itens da página.")
+    items: list[T] = Field(default_factory=list, description="Itens da pagina.")
 
 
 # --------------------------------------------------------------------------- #
-# Autenticação e usuários
+# Empresas (multi-tenant)
+# --------------------------------------------------------------------------- #
+class CompanyCreate(BaseModel):
+    """Payload de criacao de empresa (somente super admin).
+
+    Opcionalmente cria o usuario administrador inicial da empresa.
+    """
+
+    name: str = Field(..., min_length=2, max_length=255)
+    primary_color: str | None = Field(None, max_length=16)
+    admin_username: str | None = Field(None, min_length=3, max_length=64)
+    admin_password: str | None = Field(None, min_length=6, max_length=128)
+
+
+class CompanyUpdate(BaseModel):
+    """Atualizacao parcial de empresa."""
+
+    name: str | None = Field(None, min_length=2, max_length=255)
+    primary_color: str | None = Field(None, max_length=16)
+    is_active: bool | None = None
+
+
+class CompanyRead(BaseModel):
+    """Representacao de uma empresa."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    slug: str
+    logo_path: str | None = None
+    primary_color: str | None = None
+    is_active: bool
+    created_at: datetime
+
+
+class CompanyStats(CompanyRead):
+    """Empresa com contadores agregados (painel de super admin)."""
+
+    users: int = 0
+    screens: int = 0
+    media: int = 0
+    playlists: int = 0
+
+
+class BrandingRead(BaseModel):
+    """Marca exibida no painel apos o login (nome/logo/cor da empresa)."""
+
+    company_id: int | None = None
+    company_name: str | None = None
+    logo_url: str | None = None
+    primary_color: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Autenticacao e usuarios
 # --------------------------------------------------------------------------- #
 class LoginRequest(BaseModel):
     """Payload de login do painel.
 
-    ``username`` é opcional para compatibilidade com o fluxo antigo de senha
-    única; quando omitido, assume o usuário administrador padrão.
+    ``username`` e opcional para compatibilidade com o fluxo antigo de senha
+    unica; quando omitido, assume o usuario administrador padrao. A empresa e
+    resolvida automaticamente a partir do usuario.
     """
 
-    username: str | None = Field(None, description="Usuário do painel.")
+    username: str | None = Field(None, description="Usuario do painel.")
     password: str = Field(..., description="Senha do painel.")
 
 
 class TokenResponse(BaseModel):
-    """Resposta de login contendo o token de sessão assinado."""
+    """Resposta de login contendo o token de sessao assinado."""
 
     token: str
     expires_in: int = Field(..., description="Validade do token em segundos.")
     username: str
     role: UserRole
+    is_super_admin: bool = False
+    company_id: int | None = None
+    company_name: str | None = None
 
 
 class ChangePasswordRequest(BaseModel):
-    """Troca de senha do usuário autenticado."""
+    """Troca de senha do usuario autenticado."""
 
     current_password: str
     new_password: str = Field(..., min_length=6, max_length=128)
 
 
 class UserCreate(BaseModel):
-    """Payload de criação de usuário (somente admin)."""
+    """Payload de criacao de usuario (somente admin)."""
 
     username: str = Field(..., min_length=3, max_length=64)
     password: str = Field(..., min_length=6, max_length=128)
@@ -78,7 +137,7 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    """Atualização parcial de usuário (somente admin)."""
+    """Atualizacao parcial de usuario (somente admin)."""
 
     password: str | None = Field(None, min_length=6, max_length=128)
     role: UserRole | None = None
@@ -86,7 +145,7 @@ class UserUpdate(BaseModel):
 
 
 class UserRead(BaseModel):
-    """Representação pública de um usuário."""
+    """Representacao publica de um usuario."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -94,29 +153,31 @@ class UserRead(BaseModel):
     username: str
     role: UserRole
     is_active: bool
+    is_super_admin: bool = False
+    company_id: int | None = None
     created_at: datetime
     last_login: datetime | None = None
 
 
 # --------------------------------------------------------------------------- #
-# Pastas de mídia
+# Pastas de midia
 # --------------------------------------------------------------------------- #
 class FolderCreate(BaseModel):
-    """Payload de criação de pasta de mídia."""
+    """Payload de criacao de pasta de midia."""
 
     name: str = Field(..., max_length=255)
     parent_id: int | None = None
 
 
 class FolderUpdate(BaseModel):
-    """Atualização parcial de pasta."""
+    """Atualizacao parcial de pasta."""
 
     name: str | None = Field(None, max_length=255)
     parent_id: int | None = None
 
 
 class FolderRead(BaseModel):
-    """Representação de uma pasta de mídia."""
+    """Representacao de uma pasta de midia."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -130,26 +191,26 @@ class FolderRead(BaseModel):
 # Media
 # --------------------------------------------------------------------------- #
 class MediaBase(BaseModel):
-    """Campos comuns de mídia compartilhados entre criação e leitura."""
+    """Campos comuns de midia compartilhados entre criacao e leitura."""
 
-    name: str = Field(..., max_length=255, description="Nome amigável da mídia.")
-    type: MediaType = Field(..., description="Tipo da mídia.")
+    name: str = Field(..., max_length=255, description="Nome amigavel da midia.")
+    type: MediaType = Field(..., description="Tipo da midia.")
     source_url: str | None = Field(None, description="URL de origem (tipo 'url').")
     content: str | None = Field(
-        None, description="Conteúdo textual ou HTML (tipos 'text'/'html')."
+        None, description="Conteudo textual/HTML ou config JSON de widget."
     )
     tags: list[str] = Field(default_factory=list, description="Tags livres.")
-    folder_id: int | None = Field(None, description="Pasta da mídia.")
+    folder_id: int | None = Field(None, description="Pasta da midia.")
 
     _normalize_tags = field_validator("tags", mode="before")(_split_tags)
 
 
 class MediaCreate(MediaBase):
-    """Payload para criar mídia sem arquivo (texto, html, url, youtube, embed)."""
+    """Payload para criar midia sem arquivo (texto, html, url, youtube, widgets)."""
 
 
 class MediaUpdate(BaseModel):
-    """Campos opcionais para atualização parcial de mídia."""
+    """Campos opcionais para atualizacao parcial de midia."""
 
     name: str | None = Field(None, max_length=255)
     source_url: str | None = None
@@ -161,7 +222,7 @@ class MediaUpdate(BaseModel):
 
 
 class MediaRead(MediaBase):
-    """Representação de mídia retornada pela API."""
+    """Representacao de midia retornada pela API."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -171,7 +232,7 @@ class MediaRead(MediaBase):
 
 
 class BulkUrlItem(BaseModel):
-    """Item de importação em massa de mídia (texto/url/embed/youtube)."""
+    """Item de importacao em massa de midia (texto/url/embed/youtube)."""
 
     name: str = Field(..., max_length=255)
     type: MediaType
@@ -184,7 +245,7 @@ class BulkUrlItem(BaseModel):
 
 
 class BulkUrlRequest(BaseModel):
-    """Payload de importação em massa."""
+    """Payload de importacao em massa."""
 
     items: list[BulkUrlItem] = Field(..., max_length=500)
 
@@ -195,10 +256,10 @@ class BulkUrlRequest(BaseModel):
 class PlaylistItemCreate(BaseModel):
     """Payload para adicionar um item a uma playlist."""
 
-    media_id: int = Field(..., description="ID da mídia referenciada.")
-    duration: int = Field(10, ge=1, le=86400, description="Tempo de exibição (s).")
-    position: int | None = Field(None, description="Posição; ao final se omitido.")
-    fit: FitMode = Field(FitMode.contain, description="Modo de ajuste à zona.")
+    media_id: int = Field(..., description="ID da midia referenciada.")
+    duration: int = Field(10, ge=1, le=86400, description="Tempo de exibicao (s).")
+    position: int | None = Field(None, description="Posicao; ao final se omitido.")
+    fit: FitMode = Field(FitMode.contain, description="Modo de ajuste a zona.")
     transition: Transition = Field(Transition.fade, description="Efeito de entrada.")
     muted: bool = Field(True, description="True silencia (recomendado p/ autoplay).")
 
@@ -214,7 +275,7 @@ class PlaylistItemUpdate(BaseModel):
 
 
 class PlaylistItemRead(BaseModel):
-    """Item de playlist com a mídia associada embutida."""
+    """Item de playlist com a midia associada embutida."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -244,7 +305,7 @@ class PlaylistUpdate(BaseModel):
 
 
 class PlaylistRead(BaseModel):
-    """Representação completa de uma playlist, com seus itens ordenados."""
+    """Representacao completa de uma playlist, com seus itens ordenados."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -269,17 +330,17 @@ class ScheduleBase(BaseModel):
 
     playlist_id: int = Field(..., description="Playlist exibida quando ativa.")
     days_of_week: str = Field(
-        "0,1,2,3,4,5,6", description="Dias da semana (CSV, 0=segunda … 6=domingo)."
+        "0,1,2,3,4,5,6", description="Dias da semana (CSV, 0=segunda ... 6=domingo)."
     )
-    start_minute: int = Field(0, ge=0, le=1440, description="Início (min do dia).")
+    start_minute: int = Field(0, ge=0, le=1440, description="Inicio (min do dia).")
     end_minute: int = Field(1440, ge=0, le=1440, description="Fim (min do dia).")
-    priority: int = Field(0, description="Maior vence em caso de sobreposição.")
-    start_date: date | None = Field(None, description="Início da campanha (opcional).")
+    priority: int = Field(0, description="Maior vence em caso de sobreposicao.")
+    start_date: date | None = Field(None, description="Inicio da campanha (opcional).")
     end_date: date | None = Field(None, description="Fim da campanha (opcional).")
 
     @model_validator(mode="after")
     def _check_ranges(self) -> "ScheduleBase":
-        """Valida coerência das faixas de horário e de datas."""
+        """Valida coerencia das faixas de horario e de datas."""
         if self.end_minute <= self.start_minute:
             raise ValueError("end_minute deve ser maior que start_minute.")
         if (
@@ -287,7 +348,7 @@ class ScheduleBase(BaseModel):
             and self.end_date is not None
             and self.end_date < self.start_date
         ):
-            raise ValueError("end_date não pode ser anterior a start_date.")
+            raise ValueError("end_date nao pode ser anterior a start_date.")
         return self
 
 
@@ -308,7 +369,7 @@ class ScheduleUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _check_ranges(self) -> "ScheduleUpdate":
-        """Valida faixas quando ambos os limites são informados."""
+        """Valida faixas quando ambos os limites sao informados."""
         if (
             self.start_minute is not None
             and self.end_minute is not None
@@ -320,12 +381,12 @@ class ScheduleUpdate(BaseModel):
             and self.end_date is not None
             and self.end_date < self.start_date
         ):
-            raise ValueError("end_date não pode ser anterior a start_date.")
+            raise ValueError("end_date nao pode ser anterior a start_date.")
         return self
 
 
 class ScheduleRead(ScheduleBase):
-    """Representação de um agendamento."""
+    """Representacao de um agendamento."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -337,7 +398,7 @@ class ScheduleRead(ScheduleBase):
 # Zone
 # --------------------------------------------------------------------------- #
 class ZoneBase(BaseModel):
-    """Geometria e playlist padrão de uma zona (valores em % da tela)."""
+    """Geometria e playlist padrao de uma zona (valores em % da tela)."""
 
     name: str = Field("Zona", max_length=255)
     x: float = Field(0.0, ge=0, le=100)
@@ -367,7 +428,7 @@ class ZoneUpdate(BaseModel):
 
 
 class ZoneRead(ZoneBase):
-    """Representação de uma zona, com seus agendamentos."""
+    """Representacao de uma zona, com seus agendamentos."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -387,6 +448,10 @@ class ScreenCreate(BaseModel):
     default_playlist_id: int | None = Field(
         None, description="Playlist da zona principal criada automaticamente."
     )
+    template: str | None = Field(
+        None, description="Template de layout (ex.: restaurante, recepcao, varejo)."
+    )
+    sync_group: str | None = Field(None, max_length=64, description="Grupo de sincronia.")
 
 
 class ScreenUpdate(BaseModel):
@@ -394,19 +459,22 @@ class ScreenUpdate(BaseModel):
 
     name: str | None = Field(None, max_length=255)
     timezone: str | None = None
+    sync_group: str | None = Field(None, max_length=64)
     background_audio_id: int | None = Field(
         None, description="Midia de audio (tela inteira) tocada em loop."
     )
 
 
 class ScreenRead(BaseModel):
-    """Representação de uma tela retornada pela API, com suas zonas."""
+    """Representacao de uma tela retornada pela API, com suas zonas."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     name: str
     slug: str
+    pair_code: str | None = None
+    sync_group: str | None = None
     timezone: str
     created_at: datetime
     last_seen: datetime | None = None
@@ -415,7 +483,7 @@ class ScreenRead(BaseModel):
 
 
 class ScreenHealth(BaseModel):
-    """Estado de saúde/disponibilidade de uma tela."""
+    """Estado de saude/disponibilidade de uma tela."""
 
     id: int
     name: str
@@ -426,11 +494,33 @@ class ScreenHealth(BaseModel):
     seconds_since_seen: int | None = None
 
 
+class TemplateInfo(BaseModel):
+    """Descricao de um template de tela disponivel."""
+
+    key: str
+    name: str
+    description: str
+    zones: int
+
+
+class PairRequest(BaseModel):
+    """Emparelhamento de uma TV por codigo numerico."""
+
+    code: str = Field(..., min_length=4, max_length=12)
+
+
+class PairResponse(BaseModel):
+    """Resposta do emparelhamento com o slug/URL do player."""
+
+    slug: str
+    name: str
+
+
 # --------------------------------------------------------------------------- #
 # Display (payload consumido pelo player)
 # --------------------------------------------------------------------------- #
 class DisplayItem(BaseModel):
-    """Item já resolvido para reprodução no player."""
+    """Item ja resolvido para reproducao no player."""
 
     media_id: int | None = None
     type: MediaType
@@ -458,7 +548,7 @@ class DisplayZone(BaseModel):
 
 
 class DisplayPayload(BaseModel):
-    """Conteúdo completo que o player precisa para reproduzir uma tela."""
+    """Conteudo completo que o player precisa para reproduzir uma tela."""
 
     screen: str
     revision: str
@@ -470,7 +560,7 @@ class DisplayPayload(BaseModel):
 # Proof-of-play e auditoria
 # --------------------------------------------------------------------------- #
 class PlayEventCreate(BaseModel):
-    """Evento de reprodução reportado pelo player."""
+    """Evento de reproducao reportado pelo player."""
 
     media_id: int | None = None
     zone_id: int | None = None
@@ -480,7 +570,7 @@ class PlayEventCreate(BaseModel):
 
 
 class PlayEventBatch(BaseModel):
-    """Lote de eventos de reprodução (o player agrega antes de enviar)."""
+    """Lote de eventos de reproducao (o player agrega antes de enviar)."""
 
     events: list[PlayEventCreate] = Field(..., max_length=500)
 
@@ -495,7 +585,7 @@ class ProofOfPlayRow(BaseModel):
 
 
 class AuditLogRead(BaseModel):
-    """Representação de um registro de auditoria."""
+    """Representacao de um registro de auditoria."""
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -12,9 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas, services
-from ..auth import get_current_user, require_auth
+from ..auth import Scope, get_current_user, get_scope, require_auth
 from ..database import get_db
-from ..realtime import notify_screen
+from ..realtime import notify_screen, notify_sync_group
 
 router = APIRouter(
     prefix="/api/screens", tags=["screens"], dependencies=[Depends(require_auth)]
@@ -22,9 +22,11 @@ router = APIRouter(
 
 
 @router.get("", response_model=list[schemas.ScreenRead])
-def list_screens(db: Session = Depends(get_db)) -> list[models.Screen]:
-    """Lista todas as telas cadastradas com suas zonas."""
-    return crud.list_screens(db)
+def list_screens(
+    db: Session = Depends(get_db), scope: Scope = Depends(get_scope)
+) -> list[models.Screen]:
+    """Lista as telas da empresa em foco com suas zonas."""
+    return crud.list_screens(db, company_id=scope.company_id)
 
 
 @router.post("", response_model=schemas.ScreenRead, status_code=201)
@@ -32,14 +34,15 @@ def create_screen(
     data: schemas.ScreenCreate,
     db: Session = Depends(get_db),
     actor: models.User = Depends(get_current_user),
+    scope: Scope = Depends(get_scope),
 ) -> models.Screen:
-    """Cria uma nova tela com ``slug`` e uma zona principal (100%)."""
+    """Cria uma nova tela (com template opcional) na empresa em foco."""
     if (
         data.default_playlist_id is not None
         and crud.get_playlist(db, data.default_playlist_id) is None
     ):
         raise HTTPException(status_code=400, detail="Playlist inexistente.")
-    screen = crud.create_screen(db, data)
+    screen = crud.create_screen(db, data, company_id=scope.write_company_id)
     crud.record_audit(
         db,
         actor=actor.username,
@@ -85,6 +88,7 @@ async def update_screen(
         raise HTTPException(status_code=404, detail="Tela não encontrada.")
     screen = crud.update_screen(db, screen, data)
     await notify_screen(screen.slug, reason="screen-updated")
+    await notify_sync_group(db, screen.sync_group, reason="sync-group-updated")
     return screen
 
 
