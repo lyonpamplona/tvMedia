@@ -23,8 +23,9 @@ import hashlib
 import hmac
 import json
 import time
+from dataclasses import dataclass
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -146,3 +147,64 @@ def require_role(minimum: models.UserRole):
 
 require_admin = require_role(models.UserRole.admin)
 require_editor = require_role(models.UserRole.editor)
+
+
+# --------------------------------------------------------------------------- #
+# Multi-tenant (escopo por empresa)
+# --------------------------------------------------------------------------- #
+@dataclass
+class Scope:
+    """Escopo de empresa resolvido para a requisição atual.
+
+    Atributos:
+        user: usuário autenticado.
+        company_id: empresa em foco. ``None`` significa "todas as empresas"
+            (apenas super admin sem empresa selecionada) e, em listagens,
+            desativa o filtro por empresa.
+        is_super_admin: se o usuário é super administrador.
+    """
+
+    user: models.User
+    company_id: int | None
+    is_super_admin: bool
+
+    @property
+    def write_company_id(self) -> int | None:
+        """Empresa usada ao criar conteúdo.
+
+        Para super admin sem empresa selecionada, recai sobre a empresa do
+        próprio usuário (a "Matriz"), evitando criar conteúdo órfão.
+        """
+        if self.company_id is not None:
+            return self.company_id
+        return self.user.company_id
+
+
+def get_scope(
+    user: models.User = Depends(get_current_user),
+    x_company_id: str | None = Header(default=None, alias="X-Company-Id"),
+) -> Scope:
+    """Resolve o escopo de empresa da requisição.
+
+    * Usuário comum: travado na própria empresa (``user.company_id``).
+    * Super admin: pode personificar uma empresa via cabeçalho
+      ``X-Company-Id``; sem o cabeçalho, enxerga todas as empresas.
+    """
+    if user.is_super_admin:
+        if x_company_id:
+            try:
+                return Scope(user=user, company_id=int(x_company_id), is_super_admin=True)
+            except (TypeError, ValueError):
+                pass
+        return Scope(user=user, company_id=None, is_super_admin=True)
+    return Scope(user=user, company_id=user.company_id, is_super_admin=False)
+
+
+def require_super_admin(user: models.User = Depends(get_current_user)) -> models.User:
+    """Dependência que exige um super administrador (gestão de empresas)."""
+    if not user.is_super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas o super administrador pode executar esta operação.",
+        )
+    return user

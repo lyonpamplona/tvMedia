@@ -34,6 +34,22 @@ from ..websocket_manager import manager
 router = APIRouter(tags=["display"])
 
 
+@router.post("/api/display/pair", response_model=schemas.PairResponse)
+def pair_screen(data: schemas.PairRequest, db: Session = Depends(get_db)) -> schemas.PairResponse:
+    """Empareia uma TV a partir de um código numérico exibido na tela.
+
+    Fluxo para parque grande de TVs: o painel mostra o código de cada tela; ao
+    digitá-lo no dispositivo, ele recebe o ``slug`` e passa a tocar o conteúdo.
+
+    Raises:
+        HTTPException: 404 quando o código não corresponde a nenhuma tela.
+    """
+    screen = crud.get_screen_by_code(db, data.code.strip())
+    if screen is None:
+        raise HTTPException(status_code=404, detail="Código de emparelhamento inválido.")
+    return schemas.PairResponse(slug=screen.slug, name=screen.name)
+
+
 @router.get("/api/display/{slug}", response_model=schemas.DisplayPayload)
 def get_display(
     slug: str, request: Request, db: Session = Depends(get_db)

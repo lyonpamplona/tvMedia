@@ -540,9 +540,44 @@
   }
 
   /** Bootstrap do player. */
+  /**
+   * Tela de emparelhamento: solicita o codigo de 6 digitos exibido no painel
+   * e, ao validar, redireciona para o player da tela correspondente.
+   */
+  function showPairing() {
+    const wrap = document.createElement("div");
+    wrap.id = "pairing";
+    wrap.style.cssText = "position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 30%,#1f2937,#000);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#fff";
+    wrap.innerHTML = '<div style="text-align:center;max-width:90vw">' +
+      '<div style="font-size:3vmin;color:#93c5fd;letter-spacing:.06em;text-transform:uppercase;margin-bottom:1.5vmin">tvMedia Player</div>' +
+      '<div style="font-size:5vmin;font-weight:700;margin-bottom:2vmin">Emparelhar esta TV</div>' +
+      '<p style="font-size:2.6vmin;color:#cbd5e1;margin-bottom:3vmin">Digite o codigo de emparelhamento que aparece no painel, na tela desejada.</p>' +
+      '<input id="pair-code" inputmode="numeric" autocomplete="off" placeholder="------" maxlength="12" style="font-size:8vmin;letter-spacing:1vmin;text-align:center;width:9em;max-width:90vw;padding:2vmin;border-radius:12px;border:2px solid #334155;background:#0b1220;color:#fff;font-variant-numeric:tabular-nums"/>' +
+      '<div><button id="pair-go" style="margin-top:3vmin;padding:2vmin 5vmin;font-size:3.2vmin;font-weight:700;border:0;border-radius:10px;background:#7aa2f7;color:#0b0d16;cursor:pointer">Conectar</button></div>' +
+      '<p id="pair-err" style="margin-top:2vmin;font-size:2.4vmin;color:#f87171;min-height:1em"></p>' +
+      '</div>';
+    document.body.appendChild(wrap);
+    const input = wrap.querySelector("#pair-code");
+    const errEl = wrap.querySelector("#pair-err");
+    const submit = async () => {
+      const code = (input.value || "").trim();
+      if (code.length < 4) { errEl.textContent = "Informe o codigo completo."; return; }
+      errEl.textContent = "Conectando...";
+      try {
+        const resp = await fetch("/api/display/pair", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: code }) });
+        if (!resp.ok) throw new Error("Codigo invalido ou expirado.");
+        const data = await resp.json();
+        location.href = "/player/?screen=" + encodeURIComponent(data.slug);
+      } catch (err) { errEl.textContent = err.message; }
+    };
+    wrap.querySelector("#pair-go").addEventListener("click", submit);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+    input.focus();
+  }
+
   function init() {
     if (!screenSlug) {
-      showMessage("Informe a tela na URL: /player/?screen=SLUG");
+      showPairing();
       return;
     }
     if (soundBtn) {

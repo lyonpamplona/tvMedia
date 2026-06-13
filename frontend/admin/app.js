@@ -97,6 +97,9 @@
     selectedMediaId: null,
     openPlaylistId: null,
     bottomTab: "timeline",
+    activeCompanyId: null,
+    companies: [],
+    branding: null,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -122,6 +125,7 @@
     options = options || {};
     const headers = options.headers ? Object.assign({}, options.headers) : {};
     if (token) headers["Authorization"] = "Bearer " + token;
+    if (state.activeCompanyId != null) headers["X-Company-Id"] = String(state.activeCompanyId);
     if (options.body && !(options.body instanceof FormData)) headers["Content-Type"] = "application/json";
     const resp = await fetch(path, Object.assign({}, options, { headers }));
     if (resp.status === 401) { logout(); throw new Error("Sessao expirada. Entre novamente."); }
@@ -157,6 +161,26 @@
     return j;
   }
 
+  // ----- Multi-empresa (multi-tenant): branding, empresas e templates ----- //
+  async function loadBranding() { return api("/api/branding"); }
+  async function loadTemplates() { try { return await api("/api/templates"); } catch (e) { return []; } }
+  async function loadCompanies() { return api("/api/companies"); }
+  async function createCompany(data) { return api("/api/companies", { method: "POST", body: JSON.stringify(data) }); }
+  async function updateCompany(id, data) { return api("/api/companies/" + id, { method: "PATCH", body: JSON.stringify(data) }); }
+  async function deleteCompany(id) { return api("/api/companies/" + id, { method: "DELETE" }); }
+  async function uploadCompanyLogo(id, file) { const fd = new FormData(); fd.append("file", file); return api("/api/companies/" + id + "/logo", { method: "POST", body: fd }); }
+
+  /** Aplica a marca (nome/logo/cor) da empresa no cabecalho do painel. */
+  function applyBranding(b) {
+    state.branding = b || null;
+    const txt = document.querySelector(".brand-text");
+    if (txt) txt.innerHTML = b && b.company_name ? esc(b.company_name) : 'tvMedia <b>Studio</b>';
+    const mark = $("brand-mark");
+    if (mark) { if (b && b.logo_url) { mark.innerHTML = '<img src="' + esc(b.logo_url) + '" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:5px"/>'; } else { mark.innerHTML = ICONS.logo; } }
+    if (b && b.primary_color) { try { document.documentElement.style.setProperty("--accent", b.primary_color); } catch (e) { /* ignore */ } }
+  }
+  async function refreshBranding() { try { applyBranding(await loadBranding()); } catch (e) { /* ignore */ } }
+
   /** Mostra um resumo da saude das telas (online/offline + players). */
   async function reportHealth() {
     try {
@@ -183,6 +207,8 @@
     try {
       await Promise.all([loadMedia(), loadPlaylists(), loadScreens()]);
       try { state.folders = await loadFolders(); } catch (e) { state.folders = []; }
+      await refreshBranding();
+      if (state.user && state.user.is_super_admin) { try { state.companies = await loadCompanies(); } catch (e) { state.companies = []; } }
       fixSelection();
       renderAll();
     } catch (err) { toast({ kind: "err", msg: err.message }); }
@@ -306,11 +332,15 @@
     const bar = $("activitybar");
     bar.innerHTML = SECTIONS.map((s) => '<button class="act ' + (s.id === state.activeSection ? "active" : "") + '" data-sec="' + s.id + '" title="' + s.label + '">' + ICONS[s.icon] + '</button>').join("") +
       '<div class="spacer"></div>' +
+      '<button class="act" data-act="health" title="Painel de saude das telas">' + ICONS.wifi + '</button>' +
+      (state.user && state.user.is_super_admin ? '<button class="act" data-act="companies" title="Empresas (super admin)">' + ICONS.folder + '</button>' : '') +
       '<button class="act" data-act="theme" title="Alternar tema">' + ICONS.sun + '</button>' +
       '<button class="act" data-act="settings" title="Configuracoes">' + ICONS.settings + '</button>';
     bar.querySelectorAll("[data-sec]").forEach((b) => b.addEventListener("click", () => { state.activeSection = b.dataset.sec; renderActivity(); renderSidebar(); renderTabs(); renderDoc(); renderInspector(); renderBottom(); }));
     bar.querySelector('[data-act="theme"]').addEventListener("click", toggleTheme);
     bar.querySelector('[data-act="settings"]').addEventListener("click", openSettings);
+    const hb = bar.querySelector('[data-act="health"]'); if (hb) hb.addEventListener("click", openHealthPanel);
+    const cb = bar.querySelector('[data-act="companies"]'); if (cb) cb.addEventListener("click", openCompaniesPanel);
   }
 
   // Menus suspensos estilo VS Code (Projeto / Editar / Visualizar / Ajuda).
@@ -574,6 +604,8 @@
       '<button class="btn ghost block small" style="margin-top:8px" data-preview-screen>' + ICONS.eye + ' Pre-visualizar player</button>' +
       '<button class="btn ghost block small" style="margin-top:8px" data-live-preview>' + ICONS.eye + ' Pre-visualizar ao vivo (no painel)</button>' +
       '<button class="btn ghost block small" style="margin-top:8px" data-kiosk>' + ICONS.screen + ' Modo quiosque (QR code)</button></div>' +
+      '<div class="insp-section"><h5>Sincronia e emparelhamento</h5>' + field("Grupo de sincronia", '<input id="f-syncgroup" value="' + esc(sc.sync_group || "") + '" placeholder="ex.: vitrine-loja1"/>') + '<span class="hint" style="display:block;margin:-4px 0 10px">Telas no mesmo grupo recarregam juntas quando uma e atualizada.</span>' + (sc.pair_code ? '<div class="field"><label>Codigo de emparelhamento (TV)</label><div class="code">' + esc(sc.pair_code) + '</div></div><button class="btn ghost block small" data-copy-pair>' + ICONS.copy + ' Copiar codigo</button>' : '') + '</div>' +
+      '<div class="insp-section"><h5>Atalhos de layout</h5><button class="btn block" data-add-ticker>' + ICONS.tag + ' Adicionar rodape de ticker (1 clique)</button><span class="hint" style="display:block;margin-top:6px">Cria uma zona fixa de rodape (15% da altura) ja com um ticker de promocoes.</span></div>' +
       '<div class="insp-section"><h5>Musica de fundo (tela)</h5>' + screenMusicField(sc) + '</div>' +
       '<div class="insp-section"><button class="btn block" data-add-zone>' + ICONS.plus + ' Adicionar zona</button><button class="btn block small" style="margin-top:8px" data-dup-screen>' + ICONS.copy + ' Duplicar tela</button><button class="btn danger block small" style="margin-top:8px" data-del-screen>' + ICONS.trash + ' Excluir tela</button></div>';
   }
@@ -612,6 +644,9 @@
       const sc = screen();
       const sn = $("f-sname"); if (sn) { sn.addEventListener("input", () => { sc.name = sn.value; renderTabs(); renderSidebar(); }); sn.addEventListener("change", () => patchScreen(sc.id, { name: sn.value })); }
       const tz = $("f-tz"); if (tz) tz.addEventListener("change", () => patchScreen(sc.id, { timezone: tz.value }));
+      const sg = $("f-syncgroup"); if (sg) sg.addEventListener("change", async () => { try { await api("/api/screens/" + sc.id, { method: "PATCH", body: JSON.stringify({ sync_group: sg.value.trim() || null }) }); await loadScreens(); renderInspector(); toast({ kind: "ok", msg: "Grupo de sincronia atualizado." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+      const cpr = insp.querySelector("[data-copy-pair]"); if (cpr) cpr.addEventListener("click", () => copyText(sc.pair_code || ""));
+      const at = insp.querySelector("[data-add-ticker]"); if (at) at.addEventListener("click", () => addTickerFooter(sc));
       const cl = insp.querySelector("[data-copy-link]"); if (cl) cl.addEventListener("click", () => copyText(playerUrl(sc.slug)));
       const pv = insp.querySelector("[data-preview-screen]"); if (pv) pv.addEventListener("click", () => window.open(playerUrl(sc.slug), "_blank"));
       const lp = insp.querySelector("[data-live-preview]"); if (lp) lp.addEventListener("click", () => openLivePreview(sc));
@@ -788,6 +823,97 @@
   }
   function closeZoneQuickMenu() { const m = document.getElementById("zone-ctx"); if (m) m.remove(); }
 
+  /** Cria uma zona de rodape fixa (15% da altura) com um ticker de promocoes (1 clique). */
+  async function addTickerFooter(sc) {
+    if (!sc) { toast({ kind: "warn", msg: "Selecione uma tela primeiro." }); return; }
+    try {
+      const maxZ = sc.zones.reduce((m, z) => Math.max(m, z.z_index || 0), 0);
+      const newZone = await api("/api/screens/" + sc.id + "/zones", { method: "POST", body: JSON.stringify({ name: "Ticker (rodape)", x: 0, y: 85, width: 100, height: 15, z_index: maxZ + 1 }) });
+      const pl = await api("/api/playlists", { method: "POST", body: JSON.stringify({ name: sc.name + " - Ticker" }) });
+      const config = JSON.stringify({ title: "Promocoes", products: [{ name: "Edite suas ofertas aqui", price: "", note: "" }], speed: 50 });
+      const created = await api("/api/media/bulk", { method: "POST", body: JSON.stringify({ items: [{ name: "Ticker de promocoes", type: "promo", content: config }] }) });
+      const m = Array.isArray(created) ? created[0] : created;
+      await api("/api/playlists/" + pl.id + "/items", { method: "POST", body: JSON.stringify({ media_id: m.id, duration: 30, fit: "contain", transition: "none", muted: true }) });
+      await api("/api/screens/" + sc.id + "/zones/" + newZone.id, { method: "PATCH", body: JSON.stringify({ default_playlist_id: pl.id }) });
+      await loadMedia(); await loadPlaylists(); await loadScreens();
+      state.activeScreenId = sc.id; state.selectedZoneId = newZone.id;
+      renderAll();
+      toast({ kind: "ok", msg: "Rodape de ticker adicionado. Edite os produtos na midia criada." });
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+
+  /** Painel de saude das telas: online/offline, ultima reproducao e proof-of-play. */
+  async function openHealthPanel() {
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.wifi + '</span><span class="modal-title">Painel de saude das telas</span></div>' +
+      '<div class="modal-body" id="hp-body"><p class="hint">Carregando...</p></div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button><button class="btn ghost" data-refresh>' + ICONS.refresh + ' Atualizar</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    const body = modal.querySelector("#hp-body");
+    const fmtAgo = (sec) => { if (sec == null) return "nunca"; if (sec < 60) return sec + "s atras"; if (sec < 3600) return Math.floor(sec / 60) + " min atras"; if (sec < 86400) return Math.floor(sec / 3600) + " h atras"; return Math.floor(sec / 86400) + " d atras"; };
+    const load = async () => {
+      body.innerHTML = '<p class="hint">Carregando...</p>';
+      try {
+        const rows = await loadHealth();
+        let pop = [];
+        try { pop = await loadProofOfPlay(7); } catch (e) { pop = []; }
+        const online = rows.filter((r) => r.online).length;
+        const hrows = rows.length ? rows.map((r) => '<tr><td>' + (r.online ? '<span class="tag" style="color:var(--green)">online</span>' : '<span class="tag" style="color:var(--faint)">offline</span>') + '</td><td>' + esc(r.name) + '</td><td class="mono">' + fmtAgo(r.seconds_since_seen) + '</td><td class="mono">' + r.connected_players + '</td></tr>').join("") : '<tr><td colspan="4" class="empty">Nenhuma tela cadastrada.</td></tr>';
+        const prows = (pop && pop.length) ? pop.slice(0, 15).map((r) => '<tr><td>' + esc(r.media_name || "?") + '</td><td class="mono">' + r.plays + '</td><td class="mono">' + Math.round((r.total_seconds || 0) / 60) + ' min</td></tr>').join("") : '<tr><td colspan="3" class="empty">Sem dados de exibicao nos ultimos 7 dias.</td></tr>';
+        body.innerHTML = '<p class="hint" style="margin-top:0">Telas online: <b>' + online + '/' + rows.length + '</b></p>' +
+          '<table class="set-table"><thead><tr><th>Status</th><th>Tela</th><th>Ultima reproducao</th><th>Players</th></tr></thead><tbody>' + hrows + '</tbody></table>' +
+          '<label class="mm-label">Proof-of-play (ultimos 7 dias)</label>' +
+          '<table class="set-table"><thead><tr><th>Midia</th><th>Exibicoes</th><th>Tempo</th></tr></thead><tbody>' + prows + '</tbody></table>';
+      } catch (err) { body.innerHTML = '<p class="empty">' + esc(err.message) + '</p>'; }
+    };
+    modal.querySelector("[data-refresh]").addEventListener("click", load);
+    load();
+  }
+
+  /** Painel de super admin: gestao de empresas (clientes) e troca de empresa em foco. */
+  async function openCompaniesPanel() {
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.folder + '</span><span class="modal-title">Empresas (super admin)</span></div>' +
+      '<div class="modal-body" id="cp-body"><p class="hint">Carregando...</p></div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    const body = modal.querySelector("#cp-body");
+    const render = async () => {
+      body.innerHTML = '<p class="hint">Carregando...</p>';
+      try {
+        const companies = await loadCompanies();
+        state.companies = companies;
+        const curLabel = state.activeCompanyId == null ? "Todas (visao global)" : ((companies.find((c) => c.id === state.activeCompanyId) || {}).name || "?");
+        const switcher = '<div class="field"><label>Empresa em foco</label><select id="cp-switch"><option value="">Todas (visao global)</option>' + companies.map((c) => '<option value="' + c.id + '"' + (c.id === state.activeCompanyId ? " selected" : "") + '>' + esc(c.name) + '</option>').join("") + '</select></div><span class="hint" style="display:block;margin:-4px 0 12px">Em foco: <b>' + esc(curLabel) + '</b>. Trocar a empresa afeta todo o painel (telas, midias, playlists).</span>';
+        const rows = companies.map((c) => '<tr><td>' + esc(c.name) + (c.is_active ? '' : ' <span class="tag">inativa</span>') + '</td><td class="mono">' + c.users + '</td><td class="mono">' + c.screens + '</td><td class="mono">' + c.media + '</td><td class="mono">' + c.playlists + '</td><td><button class="btn ghost small" data-logo="' + c.id + '" title="Enviar logo">' + ICONS.upload + '</button><button class="btn ghost small" data-edit="' + c.id + '" title="Renomear">' + ICONS.settings + '</button><button class="btn danger small" data-delc="' + c.id + '" title="Excluir">' + ICONS.trash + '</button></td></tr>').join("");
+        body.innerHTML = switcher +
+          '<table class="set-table"><thead><tr><th>Empresa</th><th>Usuarios</th><th>Telas</th><th>Midias</th><th>Playlists</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<label class="mm-label">Nova empresa</label>' +
+          '<div class="row" style="gap:10px"><div class="field grow"><label>Nome</label><input id="nc-name"/></div><div class="field"><label>Cor (hex)</label><input id="nc-color" placeholder="#7aa2f7"/></div></div>' +
+          '<div class="row" style="gap:10px"><div class="field grow"><label>Admin (opcional)</label><input id="nc-admin"/></div><div class="field grow"><label>Senha do admin</label><input type="password" id="nc-pass"/></div></div>' +
+          '<button class="btn primary" id="nc-add">' + ICONS.plus + ' Criar empresa</button>';
+        const sw = body.querySelector("#cp-switch");
+        sw.addEventListener("change", async () => { state.activeCompanyId = sw.value ? Number(sw.value) : null; await loadAll(); render(); toast({ kind: "ok", msg: "Empresa em foco alterada." }); });
+        body.querySelector("#nc-add").addEventListener("click", async () => {
+          const name = body.querySelector("#nc-name").value.trim();
+          if (name.length < 2) { toast({ kind: "warn", msg: "Informe o nome da empresa." }); return; }
+          const payload = { name: name, primary_color: body.querySelector("#nc-color").value.trim() || null };
+          const au = body.querySelector("#nc-admin").value.trim(), ap = body.querySelector("#nc-pass").value;
+          if (au && ap) { payload.admin_username = au; payload.admin_password = ap; }
+          try { await createCompany(payload); toast({ kind: "ok", msg: "Empresa criada." }); render(); } catch (err) { toast({ kind: "err", msg: err.message }); }
+        });
+        body.querySelectorAll("[data-delc]").forEach((b) => b.addEventListener("click", async () => { const id = Number(b.dataset.delc); if (!(await confirmDialog({ title: "Excluir empresa", message: "Remover a empresa e TODO o seu conteudo (telas, midias, playlists, usuarios)? Esta acao nao pode ser desfeita.", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await deleteCompany(id); if (state.activeCompanyId === id) { state.activeCompanyId = null; await loadAll(); } toast({ kind: "warn", msg: "Empresa removida." }); render(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+        body.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", async () => { const id = Number(b.dataset.edit); const c = companies.find((x) => x.id === id); const name = await promptDialog({ title: "Renomear empresa", message: "Novo nome da empresa:", icon: "settings", defaultValue: c ? c.name : "", confirmText: "Salvar" }); if (!name) return; try { await updateCompany(id, { name: name }); toast({ kind: "ok", msg: "Empresa atualizada." }); await refreshBranding(); render(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+        body.querySelectorAll("[data-logo]").forEach((b) => b.addEventListener("click", () => { const id = Number(b.dataset.logo); const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.addEventListener("change", async () => { if (!inp.files || !inp.files[0]) return; try { await uploadCompanyLogo(id, inp.files[0]); toast({ kind: "ok", msg: "Logo atualizado." }); await refreshBranding(); render(); } catch (err) { toast({ kind: "err", msg: err.message }); } }); inp.click(); }));
+      } catch (err) { body.innerHTML = '<p class="empty">' + esc(err.message) + '</p>'; }
+    };
+    render();
+  }
+
   /** Define (ou remove, com null) a musica de fundo da tela atual. */
   async function setScreenMusic(mediaId) {
     const sc = screen(); if (!sc) return;
@@ -890,36 +1016,45 @@
     const cards = Object.keys(SCREEN_LAYOUTS).map((k) => '<button type="button" class="layout-card" data-layout="' + k + '">' + layoutPreview(SCREEN_LAYOUTS[k].zones) + '<span>' + SCREEN_LAYOUTS[k].label + '</span></button>').join("");
     modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.screen + '</span><span class="modal-title">Nova tela</span></div>' +
       '<div class="modal-body"><div class="field"><label>Nome da tela</label><input id="sw-name" value="Nova TV"/></div>' +
-      '<div class="field"><label>Fuso horario</label><input id="sw-tz" value="America/Sao_Paulo"/></div>' +
-      '<label class="mm-label">Layout inicial</label><div class="layout-grid">' + cards + '</div></div>' +
+      '<div class="row" style="gap:10px"><div class="field grow"><label>Fuso horario</label><input id="sw-tz" value="America/Sao_Paulo"/></div><div class="field grow"><label>Grupo de sincronia (opcional)</label><input id="sw-sync" placeholder="ex.: loja-1"/></div></div>' +
+      '<div class="field"><label>Template (cenario pronto)</label><select id="sw-template"><option value="">Personalizado (escolher layout abaixo)</option></select></div>' +
+      '<label class="mm-label" id="sw-layout-label">Layout inicial</label><div class="layout-grid" id="sw-layout-grid">' + cards + '</div></div>' +
       '<div class="modal-actions"><button class="btn ghost" data-cancel>Cancelar</button><button class="btn primary" data-create>' + ICONS.check + ' Criar tela</button></div>';
     const ui = buildOverlay(modal);
     const setLayout = (k) => { chosen = k; modal.querySelectorAll(".layout-card").forEach((c) => c.classList.toggle("active", c.dataset.layout === k)); };
     modal.querySelectorAll(".layout-card").forEach((c) => c.addEventListener("click", () => setLayout(c.dataset.layout)));
     setLayout("full");
+    const tplSel = modal.querySelector("#sw-template");
+    loadTemplates().then((tpls) => { (tpls || []).filter((t) => t.key !== "blank").forEach((t) => { const o = document.createElement("option"); o.value = t.key; o.textContent = t.name + " - " + t.description; tplSel.appendChild(o); }); });
+    const layoutGrid = modal.querySelector("#sw-layout-grid"); const layoutLabel = modal.querySelector("#sw-layout-label");
+    tplSel.addEventListener("change", () => { const useTpl = !!tplSel.value; layoutGrid.style.opacity = useTpl ? "0.4" : "1"; layoutGrid.style.pointerEvents = useTpl ? "none" : "auto"; if (layoutLabel) layoutLabel.textContent = useTpl ? "Layout (definido pelo template)" : "Layout inicial"; });
     modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
     modal.querySelector("[data-create]").addEventListener("click", async () => {
       const name = modal.querySelector("#sw-name").value.trim() || "Nova TV";
       const tz = modal.querySelector("#sw-tz").value.trim() || "America/Sao_Paulo";
+      const template = tplSel.value || null;
+      const syncGroup = (modal.querySelector("#sw-sync").value || "").trim() || null;
       try {
-        const created = await api("/api/screens", { method: "POST", body: JSON.stringify({ name: name, timezone: tz }) });
-        const layout = SCREEN_LAYOUTS[chosen].zones;
-        await loadScreens();
-        const fresh = state.screens.find((s) => s.id === created.id);
-        const mainZone = fresh && fresh.zones[0] ? fresh.zones[0] : null;
-        if (mainZone) {
-          const first = layout[0];
-          await api("/api/screens/" + created.id + "/zones/" + mainZone.id, { method: "PATCH", body: JSON.stringify({ name: first.name, x: first.x, y: first.y, width: first.width, height: first.height, z_index: 0 }) });
-        }
-        for (let i = 1; i < layout.length; i++) {
-          const zl = layout[i];
-          await api("/api/screens/" + created.id + "/zones", { method: "POST", body: JSON.stringify({ name: zl.name, x: zl.x, y: zl.y, width: zl.width, height: zl.height, z_index: i }) });
+        const created = await api("/api/screens", { method: "POST", body: JSON.stringify({ name: name, timezone: tz, template: template, sync_group: syncGroup }) });
+        if (!template) {
+          const layout = SCREEN_LAYOUTS[chosen].zones;
+          await loadScreens();
+          const fresh = state.screens.find((s) => s.id === created.id);
+          const mainZone = fresh && fresh.zones[0] ? fresh.zones[0] : null;
+          if (mainZone) {
+            const first = layout[0];
+            await api("/api/screens/" + created.id + "/zones/" + mainZone.id, { method: "PATCH", body: JSON.stringify({ name: first.name, x: first.x, y: first.y, width: first.width, height: first.height, z_index: 0 }) });
+          }
+          for (let i = 1; i < layout.length; i++) {
+            const zl = layout[i];
+            await api("/api/screens/" + created.id + "/zones", { method: "POST", body: JSON.stringify({ name: zl.name, x: zl.x, y: zl.y, width: zl.width, height: zl.height, z_index: i }) });
+          }
         }
         ui.close();
         await loadScreens(); state.activeSection = "screens"; state.activeScreenId = created.id;
         const s = screen(); state.selectedZoneId = s && s.zones[0] ? s.zones[0].id : null;
         renderActivity(); renderAll();
-        toast({ kind: "ok", msg: "Tela criada com " + layout.length + " zona(s)." });
+        toast({ kind: "ok", msg: template ? "Tela criada a partir do template." : "Tela criada com " + SCREEN_LAYOUTS[chosen].zones.length + " zona(s)." });
       } catch (err) { toast({ kind: "err", msg: err.message }); }
     });
   }
@@ -1354,7 +1489,7 @@
     try {
       if (token) fetch("/api/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + token }, keepalive: true }).catch(() => {});
     } catch (e) { /* best-effort */ }
-    token = null; state.user = null; localStorage.removeItem(TOKEN_KEY); $("ide").classList.add("hidden"); $("login").classList.remove("hidden");
+    token = null; state.user = null; state.activeCompanyId = null; state.companies = []; state.branding = null; localStorage.removeItem(TOKEN_KEY); $("ide").classList.add("hidden"); $("login").classList.remove("hidden");
   }
 
   // --------------------------- Inicializacao ----------------------- //
@@ -1368,10 +1503,11 @@
     $("login-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const password = $("login-password").value; const errEl = $("login-error"); errEl.textContent = "";
+      const usernameEl = $("login-username"); const username = usernameEl && usernameEl.value.trim() ? usernameEl.value.trim() : undefined;
       try {
-        const resp = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+        const resp = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: username, password: password }) });
         if (!resp.ok) throw new Error("Senha incorreta.");
-        const json = await resp.json(); token = json.token; state.user = { username: json.username, role: json.role }; localStorage.setItem(TOKEN_KEY, token); showApp();
+        const json = await resp.json(); token = json.token; state.user = { username: json.username, role: json.role, is_super_admin: !!json.is_super_admin, company_id: json.company_id, company_name: json.company_name }; state.activeCompanyId = null; localStorage.setItem(TOKEN_KEY, token); showApp();
       } catch (err) { errEl.textContent = err.message; }
     });
     $("logout").addEventListener("click", logout);

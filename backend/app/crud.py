@@ -27,6 +27,127 @@ def _tags_to_csv(tags: list[str] | None) -> str | None:
 
 
 # --------------------------------------------------------------------------- #
+# Empresas (multi-tenant)
+# --------------------------------------------------------------------------- #
+def get_company(db: Session, company_id: int) -> models.Company | None:
+    """Busca uma empresa por ID."""
+    return db.get(models.Company, company_id)
+
+
+def get_company_by_slug(db: Session, slug: str) -> models.Company | None:
+    """Busca uma empresa pelo slug."""
+    return db.scalar(select(models.Company).where(models.Company.slug == slug))
+
+
+def list_companies(db: Session) -> list[models.Company]:
+    """Lista todas as empresas ordenadas por nome."""
+    return list(db.scalars(select(models.Company).order_by(models.Company.name)))
+
+
+def count_companies(db: Session) -> int:
+    """Total de empresas cadastradas."""
+    return int(db.scalar(select(func.count()).select_from(models.Company)) or 0)
+
+
+def create_company(
+    db: Session, *, name: str, primary_color: str | None = None
+) -> models.Company:
+    """Cria uma empresa (tenant)."""
+    company = models.Company(name=name, primary_color=primary_color)
+    db.add(company)
+    db.commit()
+    db.refresh(company)
+    return company
+
+
+def update_company(
+    db: Session, company: models.Company, data: schemas.CompanyUpdate
+) -> models.Company:
+    """Atualiza nome/cor/estado de uma empresa."""
+    if data.name is not None:
+        company.name = data.name
+    if "primary_color" in data.model_fields_set:
+        company.primary_color = data.primary_color
+    if data.is_active is not None:
+        company.is_active = data.is_active
+    db.commit()
+    db.refresh(company)
+    return company
+
+
+def set_company_logo(
+    db: Session, company: models.Company, logo_path: str | None
+) -> models.Company:
+    """Define (ou limpa) o caminho do logo da empresa."""
+    company.logo_path = logo_path
+    db.commit()
+    db.refresh(company)
+    return company
+
+
+def delete_company(db: Session, company: models.Company) -> None:
+    """Remove uma empresa e, em cascata, seus dados."""
+    db.delete(company)
+    db.commit()
+
+
+def company_stats(db: Session, company: models.Company) -> dict[str, int]:
+    """Conta os principais recursos de uma empresa (para o super admin)."""
+    def _count(model) -> int:
+        return int(
+            db.scalar(
+                select(func.count())
+                .select_from(model)
+                .where(model.company_id == company.id)
+            )
+            or 0
+        )
+
+    return {
+        "users": _count(models.User),
+        "screens": _count(models.Screen),
+        "media": _count(models.Media),
+        "playlists": _count(models.Playlist),
+    }
+
+
+def seed_default_company(db: Session) -> models.Company:
+    """Garante a existencia de uma empresa padrao 'Matriz'.
+
+    Returns:
+        models.Company: a empresa padrao (criada ou ja existente).
+    """
+    existing = db.scalar(select(models.Company).order_by(models.Company.id))
+    if existing is not None:
+        return existing
+    company = models.Company(name="Matriz", primary_color="#7aa2f7")
+    db.add(company)
+    db.commit()
+    db.refresh(company)
+    return company
+
+
+def backfill_company(db: Session, company_id: int) -> None:
+    """Atribui a empresa padrao a todos os registros orfaos (sem empresa).
+
+    Migracao idempotente: roda a cada startup e so afeta linhas com
+    ``company_id`` nulo (instalacoes pre-multi-tenant).
+    """
+    for model in (
+        models.User,
+        models.MediaFolder,
+        models.Media,
+        models.Playlist,
+        models.Screen,
+    ):
+        rows = list(db.scalars(select(model).where(model.company_id.is_(None))))
+        for row in rows:
+            row.company_id = company_id
+        if rows:
+            db.commit()
+
+
+# --------------------------------------------------------------------------- #
 # Usuários
 # --------------------------------------------------------------------------- #
 def count_users(db: Session) -> int:
@@ -46,17 +167,28 @@ def get_user_by_username(db: Session, username: str) -> models.User | None:
     )
 
 
-def list_users(db: Session) -> list[models.User]:
-    """Lista todos os usuários ordenados por nome."""
-    return list(db.scalars(select(models.User).order_by(models.User.username)))
+def list_users(db: Session, *, company_id: int | None = None) -> list[models.User]:
+    """Lista usuários (opcionalmente de uma única empresa) ordenados por nome."""
+    stmt = select(models.User)
+    if company_id is not None:
+        stmt = stmt.where(models.User.company_id == company_id)
+    return list(db.scalars(stmt.order_by(models.User.username)))
 
 
-def create_user(db: Session, data: schemas.UserCreate) -> models.User:
-    """Cria um usuário com a senha já convertida em hash."""
+def create_user(
+    db: Session,
+    data: schemas.UserCreate,
+    *,
+    company_id: int | None = None,
+    is_super_admin: bool = False,
+) -> models.User:
+    """Cria um usuário com a senha já convertida em hash, vinculado a uma empresa."""
     user = models.User(
         username=data.username,
         password_hash=security.hash_password(data.password),
         role=data.role,
+        company_id=company_id,
+        is_super_admin=is_super_admin,
     )
     db.add(user)
     db.commit()
@@ -122,10 +254,13 @@ def seed_admin(db: Session) -> models.User | None:
         return None
     from .config import settings
 
+    company = seed_default_company(db)
     admin = models.User(
         username="admin",
         password_hash=security.hash_password(settings.admin_password),
         role=models.UserRole.admin,
+        company_id=company.id,
+        is_super_admin=True,
     )
     db.add(admin)
     db.commit()
@@ -144,6 +279,7 @@ def record_audit(
     entity_type: str,
     entity_id: str | int | None = None,
     detail: str | None = None,
+    company_id: int | None = None,
 ) -> models.AuditLog:
     """Registra uma ação administrativa na trilha de auditoria."""
     entry = models.AuditLog(
@@ -152,6 +288,7 @@ def record_audit(
         entity_type=entity_type,
         entity_id=str(entity_id) if entity_id is not None else None,
         detail=detail,
+        company_id=company_id,
     )
     db.add(entry)
     db.commit()
@@ -176,9 +313,12 @@ def list_audit(db: Session, *, limit: int = 100, offset: int = 0) -> tuple[list[
 # --------------------------------------------------------------------------- #
 # Pastas de mídia
 # --------------------------------------------------------------------------- #
-def list_folders(db: Session) -> list[models.MediaFolder]:
-    """Lista todas as pastas de mídia ordenadas por nome."""
-    return list(db.scalars(select(models.MediaFolder).order_by(models.MediaFolder.name)))
+def list_folders(db: Session, *, company_id: int | None = None) -> list[models.MediaFolder]:
+    """Lista pastas de mídia (opcionalmente de uma empresa) ordenadas por nome."""
+    stmt = select(models.MediaFolder)
+    if company_id is not None:
+        stmt = stmt.where(models.MediaFolder.company_id == company_id)
+    return list(db.scalars(stmt.order_by(models.MediaFolder.name)))
 
 
 def get_folder(db: Session, folder_id: int) -> models.MediaFolder | None:
@@ -186,9 +326,13 @@ def get_folder(db: Session, folder_id: int) -> models.MediaFolder | None:
     return db.get(models.MediaFolder, folder_id)
 
 
-def create_folder(db: Session, data: schemas.FolderCreate) -> models.MediaFolder:
+def create_folder(
+    db: Session, data: schemas.FolderCreate, *, company_id: int | None = None
+) -> models.MediaFolder:
     """Cria uma pasta de mídia."""
-    folder = models.MediaFolder(name=data.name, parent_id=data.parent_id)
+    folder = models.MediaFolder(
+        name=data.name, parent_id=data.parent_id, company_id=company_id
+    )
     db.add(folder)
     db.commit()
     db.refresh(folder)
@@ -222,9 +366,12 @@ def get_media(db: Session, media_id: int) -> models.Media | None:
     return db.get(models.Media, media_id)
 
 
-def list_media(db: Session) -> list[models.Media]:
-    """Lista todas as mídias (mais recentes primeiro)."""
-    return list(db.scalars(select(models.Media).order_by(models.Media.created_at.desc())))
+def list_media(db: Session, *, company_id: int | None = None) -> list[models.Media]:
+    """Lista mídias (opcionalmente de uma empresa), mais recentes primeiro."""
+    stmt = select(models.Media)
+    if company_id is not None:
+        stmt = stmt.where(models.Media.company_id == company_id)
+    return list(db.scalars(stmt.order_by(models.Media.created_at.desc())))
 
 
 def list_media_paginated(
@@ -235,6 +382,7 @@ def list_media_paginated(
     folder_id: int | None = None,
     tag: str | None = None,
     search: str | None = None,
+    company_id: int | None = None,
 ) -> tuple[list[models.Media], int]:
     """Lista mídias com filtros opcionais e paginação.
 
@@ -249,6 +397,8 @@ def list_media_paginated(
         tuple[list[Media], int]: itens da página e total filtrado.
     """
     conditions = []
+    if company_id is not None:
+        conditions.append(models.Media.company_id == company_id)
     if folder_id is not None:
         if folder_id == 0:
             conditions.append(models.Media.folder_id.is_(None))
@@ -284,6 +434,7 @@ def create_media(
     content: str | None = None,
     tags: list[str] | None = None,
     folder_id: int | None = None,
+    company_id: int | None = None,
 ) -> models.Media:
     """Cria uma mídia.
 
@@ -307,6 +458,7 @@ def create_media(
         content=content,
         tags=_tags_to_csv(tags),
         folder_id=folder_id,
+        company_id=company_id,
     )
     db.add(media)
     db.commit()
@@ -354,27 +506,37 @@ def get_playlist(db: Session, playlist_id: int) -> models.Playlist | None:
     return db.scalar(_playlist_query().where(models.Playlist.id == playlist_id))
 
 
-def list_playlists(db: Session) -> list[models.Playlist]:
-    """Lista todas as playlists com itens carregados."""
-    return list(db.scalars(_playlist_query().order_by(models.Playlist.name)))
+def list_playlists(db: Session, *, company_id: int | None = None) -> list[models.Playlist]:
+    """Lista playlists (opcionalmente de uma empresa) com itens carregados."""
+    stmt = _playlist_query()
+    if company_id is not None:
+        stmt = stmt.where(models.Playlist.company_id == company_id)
+    return list(db.scalars(stmt.order_by(models.Playlist.name)))
 
 
 def list_playlists_paginated(
-    db: Session, *, limit: int = 50, offset: int = 0
+    db: Session, *, limit: int = 50, offset: int = 0, company_id: int | None = None
 ) -> tuple[list[models.Playlist], int]:
     """Lista playlists com paginação e total."""
-    total = int(db.scalar(select(func.count()).select_from(models.Playlist)) or 0)
+    count_stmt = select(func.count()).select_from(models.Playlist)
+    base = _playlist_query()
+    if company_id is not None:
+        count_stmt = count_stmt.where(models.Playlist.company_id == company_id)
+        base = base.where(models.Playlist.company_id == company_id)
+    total = int(db.scalar(count_stmt) or 0)
     rows = list(
         db.scalars(
-            _playlist_query().order_by(models.Playlist.name).limit(limit).offset(offset)
+            base.order_by(models.Playlist.name).limit(limit).offset(offset)
         )
     )
     return rows, total
 
 
-def create_playlist(db: Session, data: schemas.PlaylistCreate) -> models.Playlist:
+def create_playlist(
+    db: Session, data: schemas.PlaylistCreate, *, company_id: int | None = None
+) -> models.Playlist:
     """Cria uma playlist vazia."""
-    playlist = models.Playlist(name=data.name)
+    playlist = models.Playlist(name=data.name, company_id=company_id)
     db.add(playlist)
     db.commit()
     return get_playlist(db, playlist.id)
@@ -485,28 +647,70 @@ def get_screen_by_slug(db: Session, slug: str) -> models.Screen | None:
     return db.scalar(_screen_query().where(models.Screen.slug == slug))
 
 
-def list_screens(db: Session) -> list[models.Screen]:
-    """Lista todas as telas."""
-    return list(db.scalars(_screen_query().order_by(models.Screen.name)))
+def get_screen_by_code(db: Session, code: str) -> models.Screen | None:
+    """Busca uma tela pelo código de emparelhamento (6 dígitos)."""
+    return db.scalar(_screen_query().where(models.Screen.pair_code == code))
 
 
-def create_screen(db: Session, data: schemas.ScreenCreate) -> models.Screen:
-    """Cria uma tela e uma zona principal (tela cheia) associada."""
-    screen = models.Screen(name=data.name, timezone=data.timezone)
+def _template_zones(
+    template: str | None, default_playlist_id: int | None
+) -> list[dict]:
+    """Geometria das zonas para um template de tela (cenários prontos)."""
+    full = [
+        {"name": "Principal", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0,
+         "z_index": 0, "default_playlist_id": default_playlist_id},
+    ]
+    if not template or template == "blank":
+        return full
+    if template == "restaurante":
+        return [
+            {"name": "Cardapio", "x": 0.0, "y": 0.0, "width": 100.0, "height": 82.0,
+             "z_index": 0, "default_playlist_id": default_playlist_id},
+            {"name": "Promocoes (rodape)", "x": 0.0, "y": 82.0, "width": 100.0,
+             "height": 18.0, "z_index": 1, "default_playlist_id": None},
+        ]
+    if template == "recepcao":
+        return [
+            {"name": "Destaque", "x": 0.0, "y": 0.0, "width": 72.0, "height": 100.0,
+             "z_index": 0, "default_playlist_id": default_playlist_id},
+            {"name": "Avisos", "x": 72.0, "y": 0.0, "width": 28.0, "height": 86.0,
+             "z_index": 1, "default_playlist_id": None},
+            {"name": "Relogio/Clima", "x": 72.0, "y": 86.0, "width": 28.0,
+             "height": 14.0, "z_index": 2, "default_playlist_id": None},
+        ]
+    if template == "varejo":
+        return [
+            {"name": "Vitrine", "x": 0.0, "y": 0.0, "width": 100.0, "height": 76.0,
+             "z_index": 0, "default_playlist_id": default_playlist_id},
+            {"name": "Ofertas (rodape)", "x": 0.0, "y": 76.0, "width": 100.0,
+             "height": 24.0, "z_index": 1, "default_playlist_id": None},
+        ]
+    return full
+
+
+def list_screens(db: Session, *, company_id: int | None = None) -> list[models.Screen]:
+    """Lista telas (opcionalmente de uma empresa)."""
+    stmt = _screen_query()
+    if company_id is not None:
+        stmt = stmt.where(models.Screen.company_id == company_id)
+    return list(db.scalars(stmt.order_by(models.Screen.name)))
+
+
+def create_screen(
+    db: Session, data: schemas.ScreenCreate, *, company_id: int | None = None
+) -> models.Screen:
+    """Cria uma tela, aplicando um template de layout quando informado."""
+    screen = models.Screen(
+        name=data.name,
+        timezone=data.timezone,
+        company_id=company_id,
+        sync_group=data.sync_group,
+    )
     db.add(screen)
     db.commit()
     db.refresh(screen)
-    main_zone = models.Zone(
-        screen_id=screen.id,
-        name="Principal",
-        x=0.0,
-        y=0.0,
-        width=100.0,
-        height=100.0,
-        z_index=0,
-        default_playlist_id=data.default_playlist_id,
-    )
-    db.add(main_zone)
+    for zone_def in _template_zones(data.template, data.default_playlist_id):
+        db.add(models.Zone(screen_id=screen.id, **zone_def))
     db.commit()
     return get_screen(db, screen.id)
 
@@ -519,6 +723,8 @@ def update_screen(
         screen.name = data.name
     if data.timezone is not None:
         screen.timezone = data.timezone
+    if "sync_group" in data.model_fields_set:
+        screen.sync_group = data.sync_group
     if "background_audio_id" in data.model_fields_set:
         screen.background_audio_id = data.background_audio_id
     db.commit()
@@ -650,7 +856,11 @@ def resolve_active_playlist_id(zone: models.Zone, now: datetime) -> int | None:
 # Proof-of-play (eventos de reprodução)
 # --------------------------------------------------------------------------- #
 def record_play_events(
-    db: Session, *, screen_slug: str, events: list[schemas.PlayEventCreate]
+    db: Session,
+    *,
+    screen_slug: str,
+    events: list[schemas.PlayEventCreate],
+    company_id: int | None = None,
 ) -> int:
     """Persiste um lote de eventos de reprodução reportados pelo player.
 
@@ -660,6 +870,7 @@ def record_play_events(
     rows = [
         models.PlayEvent(
             screen_slug=screen_slug,
+            company_id=company_id,
             zone_id=event.zone_id,
             media_id=event.media_id,
             media_name=event.media_name,

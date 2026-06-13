@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
-from ..auth import require_auth
+from ..auth import Scope, get_scope, require_auth
 from ..database import get_db
 
 router = APIRouter(
@@ -19,19 +19,23 @@ router = APIRouter(
 
 
 @router.get("", response_model=list[schemas.FolderRead])
-def list_folders(db: Session = Depends(get_db)) -> list[models.MediaFolder]:
-    """Lista todas as pastas de mídia."""
-    return crud.list_folders(db)
+def list_folders(
+    db: Session = Depends(get_db), scope: Scope = Depends(get_scope)
+) -> list[models.MediaFolder]:
+    """Lista as pastas de mídia da empresa em foco."""
+    return crud.list_folders(db, company_id=scope.company_id)
 
 
 @router.post("", response_model=schemas.FolderRead, status_code=status.HTTP_201_CREATED)
 def create_folder(
-    data: schemas.FolderCreate, db: Session = Depends(get_db)
+    data: schemas.FolderCreate,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
 ) -> models.MediaFolder:
-    """Cria uma nova pasta de mídia."""
+    """Cria uma nova pasta de mídia na empresa em foco."""
     if data.parent_id is not None and crud.get_folder(db, data.parent_id) is None:
         raise HTTPException(status_code=400, detail="Pasta pai inexistente.")
-    return crud.create_folder(db, data)
+    return crud.create_folder(db, data, company_id=scope.write_company_id)
 
 
 @router.patch("/{folder_id}", response_model=schemas.FolderRead)

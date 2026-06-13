@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas
-from ..auth import require_auth
+from ..auth import Scope, get_scope, require_auth
 from ..database import get_db
 from ..websocket_manager import manager
 
@@ -41,11 +41,13 @@ def proof_of_play(
 
 
 @router.get("/screens/health", response_model=list[schemas.ScreenHealth])
-def screens_health(db: Session = Depends(get_db)) -> list[schemas.ScreenHealth]:
-    """Retorna o estado de saúde de todas as telas."""
+def screens_health(
+    db: Session = Depends(get_db), scope: Scope = Depends(get_scope)
+) -> list[schemas.ScreenHealth]:
+    """Retorna o estado de saúde das telas da empresa em foco."""
     now = datetime.now(timezone.utc)
     health: list[schemas.ScreenHealth] = []
-    for screen in crud.list_screens(db):
+    for screen in crud.list_screens(db, company_id=scope.company_id):
         seconds_since: int | None = None
         online = False
         if screen.last_seen is not None:
