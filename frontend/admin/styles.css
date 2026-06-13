@@ -501,3 +501,7 @@ kbd {
 .layout-mini span { position: absolute; background: var(--accent, #7aa2f7); opacity: .55; border: 1px solid rgba(255,255,255,.25); box-sizing: border-box; }
 .live-frame { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; overflow: hidden; margin-bottom: 8px; }
 .live-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+/* ---- v18: modo quiosque (QR code) ---- */
+.qr-box { display:inline-block; padding:12px; background:#fff; border-radius:12px; margin:6px 0 12px; box-shadow:0 6px 18px rgba(0,0,0,.35); }
+.qr-box img { display:block; width:240px; height:240px; }
