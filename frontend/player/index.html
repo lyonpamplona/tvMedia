@@ -3,31 +3,101 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AdSignage — Player</title>
+  <title>tvMedia — Player</title>
   <style>
-    /* Player em tela cheia, fundo preto, sem barras de rolagem. */
-    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-    #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
-    #stage img, #stage video, #stage iframe {
-      max-width: 100%; max-height: 100%; width: 100%; height: 100%;
-      object-fit: contain; border: 0;
+    /* Reset e tela cheia preta, sem barras de rolagem. */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    #stage { position: relative; width: 100vw; height: 100vh; background: #000; }
+
+    /* Cada zona ocupa uma região absoluta da tela (definida em %). */
+    .zone { position: absolute; overflow: hidden; background: #000; container-type: size; }
+
+    /* Camadas de mídia dentro da zona (usadas para crossfade). */
+    .layer {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity 600ms ease, transform 600ms ease;
     }
+    .layer.visible { opacity: 1; transform: none; }
+    .layer.fade { opacity: 0; }
+    .layer.slide { transform: translateX(40px); opacity: 0; }
+
+    .layer img, .layer video, .layer iframe {
+      width: 100%; height: 100%; border: 0; background: #000;
+    }
+    .fit-contain img, .fit-contain video { object-fit: contain; }
+    .fit-cover img, .fit-cover video { object-fit: cover; }
+    .fit-fill img, .fit-fill video { object-fit: fill; }
+    /* v30: wrapper que ajusta iframes (YouTube) ao tamanho da zona sem barras. */
+    .iframe-fit { position: absolute; inset: 0; overflow: hidden; background: #000; }
+    .iframe-fit iframe { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border: 0; }
+    /* v30: estado vazio (zona sem conteudo) */
+    .zone-empty { flex-direction:column; gap:1.5cqmin; color:#64748b; background:repeating-linear-gradient(45deg,#0b0d16,#0b0d16 14px,#0f131f 14px,#0f131f 28px); }
+    .zone-empty .ze-ico { font-size:clamp(20px,16cqmin,90px); line-height:1; opacity:.6; }
+    .zone-empty .ze-msg { font-size:clamp(11px,7cqmin,34px); font-weight:700; color:#94a3b8; }
+    .zone-empty .ze-sub { font-size:clamp(9px,4.5cqmin,18px); color:#475569; }
+    .layer img, .layer video { object-position: var(--focal, center); }
+    #emergency { position: fixed; inset: 0; z-index: 10001; display: none; align-items: center; justify-content: center; text-align: center; padding: 8vmin; background: #b91c1c; color: #fff; font-family: system-ui, -apple-system, sans-serif; font-size: 6vmin; font-weight: 800; line-height: 1.25; white-space: pre-wrap; }
+    #emergency.show { display: flex; }
+
+    /* Slide de texto/HTML. */
     .text-slide {
-      color: #fff; font-family: system-ui, sans-serif; font-size: 5vw;
-      text-align: center; padding: 6vw; line-height: 1.3;
+      width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      text-align: center; padding: 6cqmin;
+      color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-size: clamp(12px, 9cqmin, 96px); line-height: 1.3;
+      background: radial-gradient(circle at 50% 30%, #1f2937, #000);
     }
+
+    /* Indicadores de status / mensagens (canto inferior). */
     #status {
-      position: fixed; bottom: 10px; right: 14px; color: #444;
-      font-family: monospace; font-size: 12px; z-index: 10;
+      position: fixed; right: 12px; bottom: 12px; z-index: 9999;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #ef4444; box-shadow: 0 0 8px rgba(0,0,0,.6);
+      transition: background 300ms ease;
     }
+    #status.online { background: #22c55e; }
     #message {
-      color: #888; font-family: system-ui, sans-serif; font-size: 3vw; text-align: center;
+      position: fixed; inset: 0; z-index: 9998;
+      display: none; align-items: center; justify-content: center;
+      color: #cbd5e1; font-family: system-ui, sans-serif; font-size: 4vmin;
+      text-align: center; padding: 6vmin; background: #000;
     }
-  </style>
+    #message.show { display: flex; }
+    /* ---- v18: widgets (relogio, clima, tickers) ---- */
+    .widget { width:100%; height:100%; display:flex; flex-direction:column; color:#fff; font-family: system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+    .widget-clock, .widget-weather { align-items:center; justify-content:center; text-align:center; gap:2cqmin; background: radial-gradient(circle at 50% 30%, #1f2937, #000); padding:4cqmin; }
+    .widget-clock .w-title, .widget-weather .w-title { font-size:clamp(9px,7cqmin,40px); color:#93c5fd; letter-spacing:.04em; text-transform:uppercase; }
+    .widget-clock .w-time { font-size:clamp(16px,26cqmin,220px); font-weight:700; line-height:1; font-variant-numeric: tabular-nums; }
+    .widget-clock .w-date { font-size:clamp(9px,7cqmin,44px); color:#cbd5e1; text-transform:capitalize; }
+    .widget-weather .w-wx { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:3cqmin; max-width:100%; }
+    .widget-weather .w-ico { font-size:clamp(14px,22cqmin,150px); line-height:1; }
+    .widget-weather .w-temp { font-size:clamp(16px,26cqmin,180px); font-weight:700; line-height:1; }
+    .widget-weather .w-cond { font-size:clamp(10px,8cqmin,48px); color:#cbd5e1; }
+    .widget-ticker { flex-direction:row; align-items:center; height:100%; background:linear-gradient(90deg,#111827,#0b1220); overflow:hidden; }
+    .widget-ticker .t-label { flex:0 0 auto; align-self:stretch; display:flex; align-items:center; padding:0 3cqh; background:#2563eb; color:#fff; font-weight:700; font-size:clamp(10px,38cqh,40px); text-transform:uppercase; letter-spacing:.04em; }
+    .widget-promo .t-label { background:#dc2626; }
+    .widget-ticker .t-track { flex:1 1 auto; overflow:hidden; position:relative; height:100%; display:flex; align-items:center; }
+    .widget-ticker .t-move { display:inline-flex; align-items:center; white-space:nowrap; will-change:transform; animation: ticker-scroll linear infinite; }
+    .widget-ticker .t-item { font-size:clamp(10px,40cqh,44px); padding:0 1.4cqh; color:#f8fafc; }
+    .widget-ticker .t-item b { color:#fde047; }
+    .widget-ticker .t-item em { color:#93c5fd; font-style:normal; font-size:clamp(8px,30cqh,32px); }
+    .widget-ticker .t-sep { color:#475569; padding:0 1.4cqh; font-size:clamp(8px,30cqh,32px); }
+    @keyframes ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+      .audio-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin; }
+    .audio-card .audio-icon { font-size: 9vmin; line-height: 1; opacity: .92; }
+    .audio-card .audio-label { font-size: 3.6vmin; color: #e2e8f0; max-width: 80%; text-align: center; }
+</style>
 </head>
 <body>
-  <div id="stage"><div id="message">Conectando…</div></div>
-  <div id="status"></div>
+  <div id="stage"></div>
+  <div id="status" title="Conexão em tempo real"></div>
+  <div id="message"></div>
+  <div id="emergency"></div>
+  <audio id="bg-audio" loop></audio>
+  <button id="sound-enable" hidden style="position:fixed;left:12px;bottom:12px;z-index:9999;padding:10px 14px;border:0;border-radius:8px;background:#7aa2f7;color:#0b0d16;font:600 14px system-ui;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.5)">Ativar som</button>
   <script src="player.js"></script>
 </body>
 </html>
