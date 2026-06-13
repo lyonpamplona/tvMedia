@@ -83,6 +83,84 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+def _run_sqlite_migrations() -> None:
+    """Migracao leve para bancos SQLite ja existentes (sem Alembic).
+
+    ``create_all`` cria apenas tabelas que ainda nao existem; ele NAO altera
+    tabelas antigas. Quando o usuario reaproveita um ``adsignage.db`` de uma
+    versao anterior, as colunas multiempresa/sincronia ficam faltando e os
+    novos recursos nao aparecem. Esta rotina adiciona, de forma idempotente,
+    as colunas que faltarem e gera codigos de emparelhamento para telas antigas.
+    """
+    if not settings.database_url.startswith("sqlite"):
+        return
+
+    import secrets
+
+    additions = {
+        "users": [("company_id", "INTEGER"), ("is_super_admin", "BOOLEAN NOT NULL DEFAULT 0")],
+        "media_folders": [("company_id", "INTEGER")],
+        "media": [("company_id", "INTEGER")],
+        "playlists": [("company_id", "INTEGER")],
+        "screens": [("pair_code", "VARCHAR(12)"), ("sync_group", "VARCHAR(64)")],
+        "audit_logs": [("company_id", "INTEGER")],
+        "play_events": [("company_id", "INTEGER")],
+    }
+
+    with engine.begin() as conn:
+        existing_tables = {
+            r[0]
+            for r in conn.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        for table, cols in additions.items():
+            if table not in existing_tables:
+                continue
+            present = {
+                r[1]
+                for r in conn.exec_driver_sql(
+                    "PRAGMA table_info(" + table + ")"
+                ).fetchall()
+            }
+            for name, ddl in cols:
+                if name not in present:
+                    conn.exec_driver_sql(
+                        "ALTER TABLE " + table + " ADD COLUMN " + name + " " + ddl
+                    )
+
+        if "screens" in existing_tables:
+            present = {
+                r[1]
+                for r in conn.exec_driver_sql(
+                    "PRAGMA table_info(screens)"
+                ).fetchall()
+            }
+            if "pair_code" in present:
+                conn.exec_driver_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_screens_pair_code "
+                    "ON screens(pair_code)"
+                )
+                used = {
+                    r[0]
+                    for r in conn.exec_driver_sql(
+                        "SELECT pair_code FROM screens WHERE pair_code IS NOT NULL"
+                    ).fetchall()
+                }
+                rows = conn.exec_driver_sql(
+                    "SELECT id FROM screens WHERE pair_code IS NULL"
+                ).fetchall()
+                for (screen_id,) in rows:
+                    code = "".join(secrets.choice("0123456789") for _ in range(6))
+                    while code in used:
+                        code = "".join(secrets.choice("0123456789") for _ in range(6))
+                    used.add(code)
+                    conn.exec_driver_sql(
+                        "UPDATE screens SET pair_code = '" + code
+                        + "' WHERE id = " + str(int(screen_id))
+                    )
+
+
 def init_db() -> None:
     """Cria todas as tabelas declaradas nos modelos, se ainda não existirem.
 
@@ -92,3 +170,4 @@ def init_db() -> None:
     from . import models  # noqa: F401  (registra os modelos na metadata)
 
     Base.metadata.create_all(bind=engine)
+    _run_sqlite_migrations()
