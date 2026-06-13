@@ -29,6 +29,9 @@
     .fit-contain img, .fit-contain video { object-fit: contain; }
     .fit-cover img, .fit-cover video { object-fit: cover; }
     .fit-fill img, .fit-fill video { object-fit: fill; }
+    .layer img, .layer video { object-position: var(--focal, center); }
+    #emergency { position: fixed; inset: 0; z-index: 10001; display: none; align-items: center; justify-content: center; text-align: center; padding: 8vmin; background: #b91c1c; color: #fff; font-family: system-ui, -apple-system, sans-serif; font-size: 6vmin; font-weight: 800; line-height: 1.25; white-space: pre-wrap; }
+    #emergency.show { display: flex; }
 
     /* Slide de texto/HTML. */
     .text-slide {
@@ -81,6 +84,7 @@
   <div id="stage"></div>
   <div id="status" title="Conexão em tempo real"></div>
   <div id="message"></div>
+  <div id="emergency"></div>
   <audio id="bg-audio" loop></audio>
   <button id="sound-enable" hidden style="position:fixed;left:12px;bottom:12px;z-index:9999;padding:10px 14px;border:0;border-radius:8px;background:#7aa2f7;color:#0b0d16;font:600 14px system-ui;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.5)">Ativar som</button>
   <script src="player.js"></script>
