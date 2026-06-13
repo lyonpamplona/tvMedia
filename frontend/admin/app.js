@@ -75,6 +75,8 @@
   };
   const FITS = ["cover", "contain", "fill"];
   const FIT_LABELS = { cover: "Preencher tela", contain: "Ajustar (sem cortes)", fill: "Esticar" };
+  const FOCALS = ["center", "top", "bottom", "left", "right"];
+  const FOCAL_LABELS = { center: "Foco: centro", top: "Foco: topo", bottom: "Foco: base", left: "Foco: esq.", right: "Foco: dir." };
   const TRANSITIONS = ["none", "fade", "slide"];
   const DAYS = ["S", "T", "Q", "Q", "S", "S", "D"];
   const DAYS_FULL = ["Segunda", "Terca", "Quarta", "Quinta", "Sexta", "Sabado", "Domingo"];
@@ -172,6 +174,40 @@
   async function updateCompany(id, data) { return api("/api/companies/" + id, { method: "PATCH", body: JSON.stringify(data) }); }
   async function deleteCompany(id) { return api("/api/companies/" + id, { method: "DELETE" }); }
   async function uploadCompanyLogo(id, file) { const fd = new FormData(); fd.append("file", file); return api("/api/companies/" + id + "/logo", { method: "POST", body: fd }); }
+
+  // Le as dimensoes (px) de imagem/video no navegador antes do upload.
+  function readMediaDims(file, kind) {
+    return new Promise((resolve) => {
+      try {
+        if (kind === "image") { const img = new Image(); const u = URL.createObjectURL(file); img.onload = () => { resolve({ width: img.naturalWidth, height: img.naturalHeight }); URL.revokeObjectURL(u); }; img.onerror = () => { resolve(null); URL.revokeObjectURL(u); }; img.src = u; }
+        else if (kind === "video") { const v = document.createElement("video"); const u = URL.createObjectURL(file); v.onloadedmetadata = () => { resolve({ width: v.videoWidth, height: v.videoHeight }); URL.revokeObjectURL(u); }; v.onerror = () => { resolve(null); URL.revokeObjectURL(u); }; v.src = u; }
+        else resolve(null);
+      } catch (e) { resolve(null); }
+    });
+  }
+
+  // Alerta quando a midia tem resolucao menor que a tela ativa.
+  function warnIfLowRes(media) {
+    try {
+      const sc = (typeof screen === "function") ? screen() : null;
+      if (!sc || !sc.resolution || !media || !media.width || !media.height) return;
+      if (media.type !== "image" && media.type !== "video") return;
+      const parts = String(sc.resolution).toLowerCase().split("x"); const sw = Number(parts[0]) || 0; const sh = Number(parts[1]) || 0;
+      if (sw && sh && (media.width < sw * 0.85 || media.height < sh * 0.85)) {
+        toast({ kind: "warn", msg: "Atencao: " + media.name + " (" + media.width + "x" + media.height + ") tem resolucao menor que a tela (" + sc.resolution + "). Pode aparecer borrada." });
+      }
+    } catch (e) {}
+  }
+
+  // Define/limpa a mensagem de emergencia (override em tela cheia) de uma empresa.
+  async function emergencyDialog(c) {
+    if (!c) return;
+    const cur = c.emergency_active ? (c.emergency_message || "") : "";
+    const msg = await promptDialog({ title: "Mensagem de emergencia", message: "Exibida em tela cheia em todas as TVs da empresa. Deixe em branco para desativar.", icon: "shield", defaultValue: cur, confirmText: "Aplicar" });
+    if (msg === null) return;
+    const text = (msg || "").trim();
+    try { await updateCompany(c.id, text ? { emergency_message: text, emergency_active: true } : { emergency_active: false }); toast({ kind: "ok", msg: text ? "Mensagem de emergencia ativada." : "Emergencia desativada." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
 
   /** Aplica a marca (nome/logo/cor) da empresa no cabecalho do painel. */
   function applyBranding(b) {
@@ -729,7 +765,7 @@
     const fol = m.folder_id != null ? '<span class="chip">' + ICONS.folder + esc(folderName(m.folder_id) || "?") + '</span>' : "";
     const tags = (m.tags || []).slice(0, 3).map((t) => '<span class="chip">' + esc(t) + '</span>').join("");
     const meta = (fol || tags) ? '<div class="mc-meta">' + fol + tags + '</div>' : "";
-    return '<div class="media-card' + (m.id === state.selectedMediaId ? " sel" : "") + '" data-mcard="' + m.id + '">' + thumb + '<div class="mc-body"><div class="mc-name">' + esc(m.name) + '</div>' + meta + '<div class="mc-foot"><span class="tag">' + TYPE_LABEL[m.type] + '</span><button class="btn danger small" data-del-media="' + m.id + '">' + ICONS.trash + '</button></div></div></div>';
+    return '<div class="media-card' + (m.id === state.selectedMediaId ? " sel" : "") + '" data-mcard="' + m.id + '">' + thumb + '<div class="mc-body"><div class="mc-name">' + esc(m.name) + '</div>' + meta + '<div class="mc-foot"><span class="tag">' + TYPE_LABEL[m.type] + '</span>' + (m.width && m.height ? '<span class="tag" title="Resolucao">' + m.width + '\u00d7' + m.height + '</span>' : '') + '<button class="btn danger small" data-del-media="' + m.id + '">' + ICONS.trash + '</button></div></div></div>';
   }
   function bindMediaDoc() {
     const search = $("media-search");
@@ -781,6 +817,7 @@
   /** Adiciona uma midia ja criada a playlist padrao da zona. */
   async function addMediaToZonePlaylist(z, media) {
     const plId = await ensureZonePlaylist(z);
+    warnIfLowRes(media);
     const isVideo = media.type === "video";
     await api("/api/playlists/" + plId + "/items", { method: "POST", body: JSON.stringify({ media_id: media.id, duration: isVideo ? 30 : 12, fit: "cover", transition: "fade", muted: !isVideo }) });
     await loadPlaylists(); await loadScreens();
@@ -945,7 +982,7 @@
   }
 
   function renderSaCompanies(body, companies) {
-    const rows = companies.map((c) => '<tr><td>' + esc(c.name) + (c.is_active ? '' : ' <span class="tag">inativa</span>') + '</td><td class="mono">' + c.users + '</td><td class="mono">' + c.screens + '</td><td class="mono">' + c.media + '</td><td class="mono">' + c.playlists + '</td><td><button class="btn ghost small" data-enter="' + c.id + '" title="Abrir Studio desta empresa">' + ICONS.eye + '</button><button class="btn ghost small" data-logo="' + c.id + '" title="Enviar logo">' + ICONS.upload + '</button><button class="btn ghost small" data-edit="' + c.id + '" title="Renomear">' + ICONS.settings + '</button><button class="btn danger small" data-delc="' + c.id + '" title="Excluir">' + ICONS.trash + '</button></td></tr>').join("");
+    const rows = companies.map((c) => '<tr><td>' + esc(c.name) + (c.is_active ? '' : ' <span class="tag">inativa</span>') + '</td><td class="mono">' + c.users + '</td><td class="mono">' + c.screens + '</td><td class="mono">' + c.media + '</td><td class="mono">' + c.playlists + '</td><td><button class="btn ghost small" data-enter="' + c.id + '" title="Abrir Studio desta empresa">' + ICONS.eye + '</button><button class="btn ghost small" data-logo="' + c.id + '" title="Enviar logo">' + ICONS.upload + '</button><button class="btn ghost small" data-emerg="' + c.id + '" title="Mensagem de emergencia">' + ICONS.shield + '</button><button class="btn ghost small" data-edit="' + c.id + '" title="Renomear">' + ICONS.settings + '</button><button class="btn danger small" data-delc="' + c.id + '" title="Excluir">' + ICONS.trash + '</button></td></tr>').join("");
     body.innerHTML = '<div class="sa-panel"><h3 class="sa-section-title">Empresa em foco</h3>' + saSwitcher("sa-switch2", companies) + '</div>' +
       '<div class="sa-panel"><h3 class="sa-section-title">Empresas (clientes)</h3><table class="set-table"><thead><tr><th>Empresa</th><th>Usuarios</th><th>Telas</th><th>Midias</th><th>Playlists</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
       '<div class="sa-panel"><h3 class="sa-section-title">Nova empresa</h3>' +
@@ -965,6 +1002,7 @@
     body.querySelectorAll("[data-delc]").forEach((b) => b.addEventListener("click", async () => { const id = Number(b.dataset.delc); if (!(await confirmDialog({ title: "Excluir empresa", message: "Remover a empresa e TODO o seu conteudo (telas, midias, playlists, usuarios)? Esta acao nao pode ser desfeita.", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await deleteCompany(id); if (state.activeCompanyId === id) { state.activeCompanyId = null; await loadAll(); } toast({ kind: "warn", msg: "Empresa removida." }); renderSuperAdmin(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
     body.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", async () => { const id = Number(b.dataset.edit); const c = companies.find((x) => x.id === id); const name = await promptDialog({ title: "Renomear empresa", message: "Novo nome da empresa:", icon: "settings", defaultValue: c ? c.name : "", confirmText: "Salvar" }); if (!name) return; try { await updateCompany(id, { name: name }); toast({ kind: "ok", msg: "Empresa atualizada." }); await refreshBranding(); renderSuperAdmin(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
     body.querySelectorAll("[data-logo]").forEach((b) => b.addEventListener("click", () => { const id = Number(b.dataset.logo); const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.addEventListener("change", async () => { if (!inp.files || !inp.files[0]) return; try { await uploadCompanyLogo(id, inp.files[0]); toast({ kind: "ok", msg: "Logo atualizado." }); await refreshBranding(); renderSuperAdmin(); } catch (err) { toast({ kind: "err", msg: err.message }); } }); inp.click(); }));
+    body.querySelectorAll("[data-emerg]").forEach((b) => b.addEventListener("click", () => { const id = Number(b.dataset.emerg); const c = companies.find((x) => x.id === id); emergencyDialog(c); }));
   }
 
   /** Painel de super admin: gestao de empresas (clientes) e troca de empresa em foco. */
@@ -984,7 +1022,7 @@
         state.companies = companies;
         const curLabel = state.activeCompanyId == null ? "Todas (visao global)" : ((companies.find((c) => c.id === state.activeCompanyId) || {}).name || "?");
         const switcher = '<div class="field"><label>Empresa em foco</label><select id="cp-switch"><option value="">Todas (visao global)</option>' + companies.map((c) => '<option value="' + c.id + '"' + (c.id === state.activeCompanyId ? " selected" : "") + '>' + esc(c.name) + '</option>').join("") + '</select></div><span class="hint" style="display:block;margin:-4px 0 12px">Em foco: <b>' + esc(curLabel) + '</b>. Trocar a empresa afeta todo o painel (telas, midias, playlists).</span>';
-        const rows = companies.map((c) => '<tr><td>' + esc(c.name) + (c.is_active ? '' : ' <span class="tag">inativa</span>') + '</td><td class="mono">' + c.users + '</td><td class="mono">' + c.screens + '</td><td class="mono">' + c.media + '</td><td class="mono">' + c.playlists + '</td><td><button class="btn ghost small" data-logo="' + c.id + '" title="Enviar logo">' + ICONS.upload + '</button><button class="btn ghost small" data-edit="' + c.id + '" title="Renomear">' + ICONS.settings + '</button><button class="btn danger small" data-delc="' + c.id + '" title="Excluir">' + ICONS.trash + '</button></td></tr>').join("");
+        const rows = companies.map((c) => '<tr><td>' + esc(c.name) + (c.is_active ? '' : ' <span class="tag">inativa</span>') + '</td><td class="mono">' + c.users + '</td><td class="mono">' + c.screens + '</td><td class="mono">' + c.media + '</td><td class="mono">' + c.playlists + '</td><td><button class="btn ghost small" data-logo="' + c.id + '" title="Enviar logo">' + ICONS.upload + '</button><button class="btn ghost small" data-emerg="' + c.id + '" title="Mensagem de emergencia">' + ICONS.shield + '</button><button class="btn ghost small" data-edit="' + c.id + '" title="Renomear">' + ICONS.settings + '</button><button class="btn danger small" data-delc="' + c.id + '" title="Excluir">' + ICONS.trash + '</button></td></tr>').join("");
         body.innerHTML = switcher +
           '<table class="set-table"><thead><tr><th>Empresa</th><th>Usuarios</th><th>Telas</th><th>Midias</th><th>Playlists</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' +
           '<label class="mm-label">Nova empresa</label>' +
@@ -1004,6 +1042,7 @@
         body.querySelectorAll("[data-delc]").forEach((b) => b.addEventListener("click", async () => { const id = Number(b.dataset.delc); if (!(await confirmDialog({ title: "Excluir empresa", message: "Remover a empresa e TODO o seu conteudo (telas, midias, playlists, usuarios)? Esta acao nao pode ser desfeita.", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await deleteCompany(id); if (state.activeCompanyId === id) { state.activeCompanyId = null; await loadAll(); } toast({ kind: "warn", msg: "Empresa removida." }); render(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
         body.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", async () => { const id = Number(b.dataset.edit); const c = companies.find((x) => x.id === id); const name = await promptDialog({ title: "Renomear empresa", message: "Novo nome da empresa:", icon: "settings", defaultValue: c ? c.name : "", confirmText: "Salvar" }); if (!name) return; try { await updateCompany(id, { name: name }); toast({ kind: "ok", msg: "Empresa atualizada." }); await refreshBranding(); render(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
         body.querySelectorAll("[data-logo]").forEach((b) => b.addEventListener("click", () => { const id = Number(b.dataset.logo); const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*"; inp.addEventListener("change", async () => { if (!inp.files || !inp.files[0]) return; try { await uploadCompanyLogo(id, inp.files[0]); toast({ kind: "ok", msg: "Logo atualizado." }); await refreshBranding(); render(); } catch (err) { toast({ kind: "err", msg: err.message }); } }); inp.click(); }));
+        body.querySelectorAll("[data-emerg]").forEach((b) => b.addEventListener("click", () => { const id = Number(b.dataset.emerg); const c = companies.find((x) => x.id === id); emergencyDialog(c); }));
       } catch (err) { body.innerHTML = '<p class="empty">' + esc(err.message) + '</p>'; }
     };
     render();
@@ -1306,6 +1345,7 @@
           const file = modal.querySelector("#mm-file").files[0];
           if (!file) { toast({ kind: "warn", msg: "Selecione um arquivo." }); return; }
           const fd = new FormData(); fd.append("name", name); fd.append("file", file);
+          const dims = await readMediaDims(file, current); if (dims) { fd.append("width", dims.width); fd.append("height", dims.height); }
           if (folderId) fd.append("folder_id", folderId);
           if (tags.trim()) fd.append("tags", tags);
           created = await api("/api/media/upload", { method: "POST", body: fd });
@@ -1459,7 +1499,7 @@
     const head = '<div class="item-row row between" style="margin-bottom:12px"><strong style="font-size:14px">' + esc(pl.name) + '</strong><span class="row"><button class="btn ghost small" data-rename-pl>Renomear</button><button class="btn danger small" data-del-pl>' + ICONS.trash + ' Excluir</button></span></div>';
     const items = pl.items.length ? pl.items.map((it, i) => itemRow(pl, it, i)).join("") : '<div class="empty">Sem itens. Adicione abaixo.</div>';
     const mediaOpts = state.media.map((m) => '<option value="' + m.id + '">' + esc(m.name) + ' (' + TYPE_LABEL[m.type] + ')</option>').join("");
-    const add = '<div class="item-row row wrap" style="margin-top:12px;gap:10px"><select id="pi-media" style="flex:1;min-width:160px">' + mediaOpts + '</select><input id="pi-dur" type="number" min="1" value="10" class="mini" title="Duracao (s)"/><select id="pi-fit">' + FITS.map((f) => '<option value="' + f + '">' + FIT_LABELS[f] + '</option>').join("") + '</select><select id="pi-trans">' + TRANSITIONS.map((t) => '<option>' + t + '</option>').join("") + '</select><label class="row" style="gap:5px"><input id="pi-sound" type="checkbox"/> som</label><button class="btn primary small" id="pi-add">' + ICONS.plus + ' Item</button></div>';
+    const add = '<div class="item-row row wrap" style="margin-top:12px;gap:10px"><select id="pi-media" style="flex:1;min-width:160px">' + mediaOpts + '</select><input id="pi-dur" type="number" min="1" value="10" class="mini" title="Duracao (s)"/><select id="pi-fit">' + FITS.map((f) => '<option value="' + f + '">' + FIT_LABELS[f] + '</option>').join("") + '</select><select id="pi-focal" title="Ponto focal">' + FOCALS.map((f) => '<option value="' + f + '">' + FOCAL_LABELS[f] + '</option>').join("") + '</select><select id="pi-trans">' + TRANSITIONS.map((t) => '<option>' + t + '</option>').join("") + '</select><label class="row" style="gap:5px"><input id="pi-sound" type="checkbox"/> som</label><button class="btn primary small" id="pi-add">' + ICONS.plus + ' Item</button></div>';
     return '<div class="pl-editor">' + head + '<div class="pl-items">' + items + '</div>' + add + '</div>';
   }
   function itemRow(pl, it, i) {
@@ -1467,6 +1507,7 @@
     return '<div class="item-row" data-item="' + it.id + '"><span class="tag">' + (i + 1) + '</span>' + ICONS[TYPE_ICON[md.type]] + '<span class="grow">' + esc(md.name) + '</span>' +
       '<input type="number" min="1" value="' + it.duration + '" class="mini" data-it-dur="' + it.id + '" title="Duracao (s)"/>' +
       '<select data-it-fit="' + it.id + '">' + FITS.map((f) => '<option value="' + f + '" ' + (f === it.fit ? "selected" : "") + '>' + FIT_LABELS[f] + '</option>').join("") + '</select>' +
+      '<select data-it-focal="' + it.id + '" title="Ponto focal (corte)">' + FOCALS.map((f) => '<option value="' + f + '" ' + (f === (it.focal || "center") ? "selected" : "") + '>' + FOCAL_LABELS[f] + '</option>').join("") + '</select>' +
       '<select data-it-trans="' + it.id + '">' + TRANSITIONS.map((t) => '<option ' + (t === it.transition ? "selected" : "") + '>' + t + '</option>').join("") + '</select>' +
       '<label class="row" style="gap:4px" title="Som"><input type="checkbox" data-it-sound="' + it.id + '" ' + (it.muted ? "" : "checked") + '/></label>' +
       '<button class="btn ghost small" data-it-up="' + it.id + '">' + ICONS.up + '</button><button class="btn ghost small" data-it-down="' + it.id + '">' + ICONS.down + '</button>' +
@@ -1476,9 +1517,10 @@
     const doc = $("doc"); const pl = playlistById(state.openPlaylistId); if (!pl) return;
     const rn = doc.querySelector("[data-rename-pl]"); if (rn) rn.addEventListener("click", async () => { const name = await promptDialog({ title: "Renomear playlist", message: "Digite o novo nome da playlist:", icon: "playlist", defaultValue: pl.name, placeholder: "Nome da playlist", confirmText: "Salvar" }); if (!name) return; try { await api("/api/playlists/" + pl.id, { method: "PATCH", body: JSON.stringify({ name }) }); await loadPlaylists(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: "Playlist renomeada." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
     const dp = doc.querySelector("[data-del-pl]"); if (dp) dp.addEventListener("click", async () => { if (!(await confirmDialog({ title: "Excluir playlist", message: "Tem certeza que deseja excluir esta playlist?", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await api("/api/playlists/" + pl.id, { method: "DELETE" }); state.openPlaylistId = null; await loadPlaylists(); fixSelection(); renderSidebar(); renderDoc(); renderBottom(); toast({ kind: "warn", msg: "Playlist excluida." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
-    const add = $("pi-add"); if (add) add.addEventListener("click", async () => { const media_id = Number($("pi-media").value); if (!media_id) { toast({ kind: "warn", msg: "Selecione uma midia." }); return; } const body = { media_id, duration: Number($("pi-dur").value) || 10, fit: $("pi-fit").value, transition: $("pi-trans").value, muted: !$("pi-sound").checked }; try { await api("/api/playlists/" + pl.id + "/items", { method: "POST", body: JSON.stringify(body) }); await loadPlaylists(); renderSidebar(); renderDoc(); renderBottom(); toast({ kind: "ok", msg: "Item adicionado." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+    const add = $("pi-add"); if (add) add.addEventListener("click", async () => { const media_id = Number($("pi-media").value); if (!media_id) { toast({ kind: "warn", msg: "Selecione uma midia." }); return; } const body = { media_id, duration: Number($("pi-dur").value) || 10, fit: $("pi-fit").value, focal: $("pi-focal").value, transition: $("pi-trans").value, muted: !$("pi-sound").checked }; try { await api("/api/playlists/" + pl.id + "/items", { method: "POST", body: JSON.stringify(body) }); await loadPlaylists(); renderSidebar(); renderDoc(); renderBottom(); toast({ kind: "ok", msg: "Item adicionado." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
     doc.querySelectorAll("[data-it-dur]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itDur, { duration: Number(el.value) })));
     doc.querySelectorAll("[data-it-fit]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itFit, { fit: el.value })));
+    doc.querySelectorAll("[data-it-focal]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itFocal, { focal: el.value })));
     doc.querySelectorAll("[data-it-trans]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itTrans, { transition: el.value })));
     doc.querySelectorAll("[data-it-sound]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itSound, { muted: !el.checked })));
     doc.querySelectorAll("[data-it-del]").forEach((el) => el.addEventListener("click", async () => { try { await api("/api/playlists/" + pl.id + "/items/" + el.dataset.itDel, { method: "DELETE" }); await loadPlaylists(); renderSidebar(); renderDoc(); renderBottom(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
