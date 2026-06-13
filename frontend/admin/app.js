@@ -73,7 +73,8 @@
     split: { label: "2 zonas (lado a lado)", zones: [{ name: "Esquerda", x: 0, y: 0, width: 50, height: 100 }, { name: "Direita", x: 50, y: 0, width: 50, height: 100 }] },
     triptico: { label: "3 zonas (banner + 2 colunas)", zones: [{ name: "Banner", x: 0, y: 0, width: 100, height: 60 }, { name: "Inferior esq.", x: 0, y: 60, width: 50, height: 40 }, { name: "Inferior dir.", x: 50, y: 60, width: 50, height: 40 }] },
   };
-  const FITS = ["contain", "cover", "fill"];
+  const FITS = ["cover", "contain", "fill"];
+  const FIT_LABELS = { cover: "Preencher tela", contain: "Ajustar (sem cortes)", fill: "Esticar" };
   const TRANSITIONS = ["none", "fade", "slide"];
   const DAYS = ["S", "T", "Q", "Q", "S", "S", "D"];
   const DAYS_FULL = ["Segunda", "Terca", "Quarta", "Quinta", "Sexta", "Sabado", "Domingo"];
@@ -781,7 +782,7 @@
   async function addMediaToZonePlaylist(z, media) {
     const plId = await ensureZonePlaylist(z);
     const isVideo = media.type === "video";
-    await api("/api/playlists/" + plId + "/items", { method: "POST", body: JSON.stringify({ media_id: media.id, duration: isVideo ? 30 : 12, fit: "contain", transition: "fade", muted: !isVideo }) });
+    await api("/api/playlists/" + plId + "/items", { method: "POST", body: JSON.stringify({ media_id: media.id, duration: isVideo ? 30 : 12, fit: "cover", transition: "fade", muted: !isVideo }) });
     await loadPlaylists(); await loadScreens();
   }
 
@@ -841,7 +842,7 @@
       const config = JSON.stringify({ title: "Promocoes", products: [{ name: "Edite suas ofertas aqui", price: "", note: "" }], speed: 50 });
       const created = await api("/api/media/bulk", { method: "POST", body: JSON.stringify({ items: [{ name: "Ticker de promocoes", type: "promo", content: config }] }) });
       const m = Array.isArray(created) ? created[0] : created;
-      await api("/api/playlists/" + pl.id + "/items", { method: "POST", body: JSON.stringify({ media_id: m.id, duration: 30, fit: "contain", transition: "none", muted: true }) });
+      await api("/api/playlists/" + pl.id + "/items", { method: "POST", body: JSON.stringify({ media_id: m.id, duration: 30, fit: "cover", transition: "none", muted: true }) });
       await api("/api/screens/" + sc.id + "/zones/" + newZone.id, { method: "PATCH", body: JSON.stringify({ default_playlist_id: pl.id }) });
       await loadMedia(); await loadPlaylists(); await loadScreens();
       state.activeScreenId = sc.id; state.selectedZoneId = newZone.id;
@@ -1110,6 +1111,11 @@
     { inches: "32", label: "32\" \u2014 TV", res: ["1920x1080", "1366x768"] },
     { inches: "43", label: "43\" \u2014 TV Full HD/4K", res: ["1920x1080", "3840x2160"] },
     { inches: "50", label: "50\" \u2014 TV 4K", res: ["3840x2160", "1920x1080"] },
+    { inches: "55", label: "55\" \u2014 TV 4K", res: ["3840x2160", "1920x1080"] },
+    { inches: "65", label: "65\" \u2014 TV 4K", res: ["3840x2160", "1920x1080"] },
+    { inches: "75", label: "75\" \u2014 TV 4K", res: ["3840x2160", "1920x1080"] },
+    { inches: "86", label: "86\" \u2014 TV 4K", res: ["3840x2160", "1920x1080"] },
+    { inches: "100", label: "100\" \u2014 TV 4K (mural)", res: ["3840x2160", "1920x1080"] },
   ];
   function sizeByInches(inches) { return SCREEN_SIZES.find((s) => s.inches === String(inches)) || SCREEN_SIZES[3]; }
   function screenAspect(sc) {
@@ -1453,14 +1459,14 @@
     const head = '<div class="item-row row between" style="margin-bottom:12px"><strong style="font-size:14px">' + esc(pl.name) + '</strong><span class="row"><button class="btn ghost small" data-rename-pl>Renomear</button><button class="btn danger small" data-del-pl>' + ICONS.trash + ' Excluir</button></span></div>';
     const items = pl.items.length ? pl.items.map((it, i) => itemRow(pl, it, i)).join("") : '<div class="empty">Sem itens. Adicione abaixo.</div>';
     const mediaOpts = state.media.map((m) => '<option value="' + m.id + '">' + esc(m.name) + ' (' + TYPE_LABEL[m.type] + ')</option>').join("");
-    const add = '<div class="item-row row wrap" style="margin-top:12px;gap:10px"><select id="pi-media" style="flex:1;min-width:160px">' + mediaOpts + '</select><input id="pi-dur" type="number" min="1" value="10" class="mini" title="Duracao (s)"/><select id="pi-fit">' + FITS.map((f) => '<option>' + f + '</option>').join("") + '</select><select id="pi-trans">' + TRANSITIONS.map((t) => '<option>' + t + '</option>').join("") + '</select><label class="row" style="gap:5px"><input id="pi-sound" type="checkbox"/> som</label><button class="btn primary small" id="pi-add">' + ICONS.plus + ' Item</button></div>';
+    const add = '<div class="item-row row wrap" style="margin-top:12px;gap:10px"><select id="pi-media" style="flex:1;min-width:160px">' + mediaOpts + '</select><input id="pi-dur" type="number" min="1" value="10" class="mini" title="Duracao (s)"/><select id="pi-fit">' + FITS.map((f) => '<option value="' + f + '">' + FIT_LABELS[f] + '</option>').join("") + '</select><select id="pi-trans">' + TRANSITIONS.map((t) => '<option>' + t + '</option>').join("") + '</select><label class="row" style="gap:5px"><input id="pi-sound" type="checkbox"/> som</label><button class="btn primary small" id="pi-add">' + ICONS.plus + ' Item</button></div>';
     return '<div class="pl-editor">' + head + '<div class="pl-items">' + items + '</div>' + add + '</div>';
   }
   function itemRow(pl, it, i) {
     const md = it.media;
     return '<div class="item-row" data-item="' + it.id + '"><span class="tag">' + (i + 1) + '</span>' + ICONS[TYPE_ICON[md.type]] + '<span class="grow">' + esc(md.name) + '</span>' +
       '<input type="number" min="1" value="' + it.duration + '" class="mini" data-it-dur="' + it.id + '" title="Duracao (s)"/>' +
-      '<select data-it-fit="' + it.id + '">' + FITS.map((f) => '<option ' + (f === it.fit ? "selected" : "") + '>' + f + '</option>').join("") + '</select>' +
+      '<select data-it-fit="' + it.id + '">' + FITS.map((f) => '<option value="' + f + '" ' + (f === it.fit ? "selected" : "") + '>' + FIT_LABELS[f] + '</option>').join("") + '</select>' +
       '<select data-it-trans="' + it.id + '">' + TRANSITIONS.map((t) => '<option ' + (t === it.transition ? "selected" : "") + '>' + t + '</option>').join("") + '</select>' +
       '<label class="row" style="gap:4px" title="Som"><input type="checkbox" data-it-sound="' + it.id + '" ' + (it.muted ? "" : "checked") + '/></label>' +
       '<button class="btn ghost small" data-it-up="' + it.id + '">' + ICONS.up + '</button><button class="btn ghost small" data-it-down="' + it.id + '">' + ICONS.down + '</button>' +
