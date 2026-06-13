@@ -519,6 +519,8 @@ def update_screen(
         screen.name = data.name
     if data.timezone is not None:
         screen.timezone = data.timezone
+    if "background_audio_id" in data.model_fields_set:
+        screen.background_audio_id = data.background_audio_id
     db.commit()
     return get_screen(db, screen.id)
 

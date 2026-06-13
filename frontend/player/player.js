@@ -21,6 +21,10 @@
   const stage = document.getElementById("stage");
   const statusDot = document.getElementById("status");
   const messageBox = document.getElementById("message");
+  const bgAudio = document.getElementById("bg-audio");
+  const soundBtn = document.getElementById("sound-enable");
+  /** URL da musica de fundo atualmente carregada. @type {string|null} */
+  let currentAudioUrl = null;
 
   /** Revisão atual em reprodução. @type {string|null} */
   let currentRevision = null;
@@ -51,6 +55,30 @@
    */
   function setOnline(online) {
     statusDot.classList.toggle("online", online);
+  }
+
+  /**
+   * Sincroniza a musica de fundo da tela (nivel de tela inteira). Toca em loop
+   * e nao reinicia quando apenas o conteudo das zonas muda.
+   * @param {string|null} url URL do audio, ou null para silenciar.
+   */
+  function updateBackgroundAudio(url) {
+    if (url === currentAudioUrl) return;
+    currentAudioUrl = url;
+    if (!url) {
+      bgAudio.pause();
+      bgAudio.removeAttribute("src");
+      try { bgAudio.load(); } catch (e) { /* noop */ }
+      if (soundBtn) soundBtn.hidden = true;
+      return;
+    }
+    bgAudio.src = url;
+    const attempt = bgAudio.play();
+    if (attempt && typeof attempt.then === "function") {
+      attempt
+        .then(() => { if (soundBtn) soundBtn.hidden = true; })
+        .catch(() => { if (soundBtn) soundBtn.hidden = false; });
+    }
   }
 
   // Conjunto de tags/atributos permitidos ao renderizar HTML de uma mídia.
@@ -335,6 +363,7 @@
       }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const payload = await resp.json();
+      updateBackgroundAudio(payload.background_audio || null);
       if (force || payload.revision !== currentRevision) {
         currentRevision = payload.revision;
         render(payload);
@@ -379,6 +408,11 @@
     if (!screenSlug) {
       showMessage("Informe a tela na URL: /player/?screen=SLUG");
       return;
+    }
+    if (soundBtn) {
+      soundBtn.addEventListener("click", () => {
+        bgAudio.play().then(() => { soundBtn.hidden = true; }).catch(() => {});
+      });
     }
     refresh(true);
     connectSocket();

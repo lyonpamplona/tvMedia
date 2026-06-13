@@ -42,10 +42,12 @@ router = APIRouter(
 # Extensões aceitas por tipo de upload.
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
 _VIDEO_EXTS = {".mp4", ".webm", ".ogg", ".mov", ".mkv"}
+_AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".oga", ".wav", ".flac"}
 
 # Prefixos de content-type aceitos por tipo (defesa adicional além da extensão).
 _IMAGE_MIME_PREFIX = "image/"
 _VIDEO_MIME_PREFIX = "video/"
+_AUDIO_MIME_PREFIX = "audio/"
 
 # Tamanho do bloco de leitura/gravação no upload (1 MB), para uso de memória
 # praticamente constante mesmo com vídeos grandes (ex.: Raspberry Pi 4).
@@ -105,10 +107,14 @@ async def create_media(
     data: schemas.MediaCreate, db: Session = Depends(get_db)
 ) -> models.Media:
     """Cria uma mídia sem upload (texto, HTML, URL, embed, youtube)."""
-    if data.type in (models.MediaType.image, models.MediaType.video):
+    if data.type in (
+        models.MediaType.image,
+        models.MediaType.video,
+        models.MediaType.audio,
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Imagens e vídeos devem ser enviados via /api/media/upload.",
+            detail="Imagens, vídeos e áudios devem ser enviados via /api/media/upload.",
         )
     _validate_folder(db, data.folder_id)
     media = crud.create_media(
@@ -135,10 +141,14 @@ async def bulk_create_media(
     """
     created: list[models.Media] = []
     for item in data.items:
-        if item.type in (models.MediaType.image, models.MediaType.video):
+        if item.type in (
+            models.MediaType.image,
+            models.MediaType.video,
+            models.MediaType.audio,
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Importação em massa não aceita imagens/vídeos.",
+                detail="Importação em massa não aceita imagens/vídeos/áudios.",
             )
         _validate_folder(db, item.folder_id)
         created.append(
@@ -190,6 +200,13 @@ async def upload_media(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="O conteúdo enviado não parece ser um vídeo.",
+            )
+    elif suffix in _AUDIO_EXTS:
+        media_type = models.MediaType.audio
+        if content_type and not content_type.startswith(_AUDIO_MIME_PREFIX):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="O conteúdo enviado não parece ser um áudio.",
             )
     else:
         raise HTTPException(
