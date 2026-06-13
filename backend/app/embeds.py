@@ -64,7 +64,7 @@ def _extract_youtube(url: str) -> tuple[str | None, str | None]:
     return video_id, playlist_id
 
 
-def build_youtube_embed(url: str, *, muted: bool = True) -> str:
+def build_youtube_embed(url: str, *, muted: bool = True, loop: bool = True, jsapi: bool = False) -> str:
     """Monta a URL de embed do YouTube com autoplay e loop.
 
     Para um vídeo único, o loop exige repetir o próprio ID em ``playlist=``
@@ -84,15 +84,19 @@ def build_youtube_embed(url: str, *, muted: bool = True) -> str:
         f"autoplay=1&mute={mute}&controls=0&rel=0"
         "&modestbranding=1&playsinline=1"
     )
+    if jsapi:
+        common += "&enablejsapi=1"
     if playlist_id:
+        loop_part = "&loop=1" if loop else ""
         return (
             "https://www.youtube.com/embed/videoseries"
-            f"?list={quote(playlist_id)}&loop=1&{common}"
+            f"?list={quote(playlist_id)}{loop_part}&{common}"
         )
     if video_id:
+        loop_part = f"loop=1&playlist={video_id}&" if loop else ""
         return (
             f"https://www.youtube.com/embed/{video_id}"
-            f"?loop=1&playlist={video_id}&{common}"
+            f"?{loop_part}{common}"
         )
     return url
 
@@ -110,7 +114,7 @@ def _build_spotify_embed(url: str) -> str:
     return f"https://open.spotify.com/embed{parsed.path}"
 
 
-def build_embed_url(media: "models.Media", *, muted: bool = True) -> str:
+def build_embed_url(media: "models.Media", *, muted: bool = True, play_full: bool = False) -> str:
     """Resolve a URL final de incorporação conforme o tipo da mídia.
 
     Args:
@@ -122,12 +126,12 @@ def build_embed_url(media: "models.Media", *, muted: bool = True) -> str:
     """
     url = media.source_url or ""
     if media.type == models.MediaType.youtube:
-        return build_youtube_embed(url, muted=muted)
+        return build_youtube_embed(url, muted=muted, loop=not play_full, jsapi=play_full)
     if media.type == models.MediaType.embed:
         host = (urlparse(url).hostname or "").lower() if url else ""
         if "spotify.com" in host:
             return _build_spotify_embed(url)
         if "youtube" in host or "youtu.be" in host:
-            return build_youtube_embed(url, muted=muted)
+            return build_youtube_embed(url, muted=muted, loop=not play_full, jsapi=play_full)
         return url
     return url

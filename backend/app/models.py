@@ -272,6 +272,8 @@ class PlaylistItem(Base):
         Enum(Transition), nullable=False, default=Transition.fade
     )
     muted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Tocar a midia inteira (video/audio/YouTube) em vez de cortar na duracao.
+    play_full: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     playlist: Mapped["Playlist"] = relationship(back_populates="items")
     media: Mapped["Media"] = relationship(back_populates="items")

@@ -1,7 +1,7 @@
 // Service worker do player de sinalizacao tvMedia.
 // Estrategia: cache-first para o app shell e midias (resiliencia offline),
 // network-first para chamadas dinamicas /api/ (com fallback ao cache).
-const CACHE = "tvmedia-player-v2";
+const CACHE = "tvmedia-player-v3";
 const SHELL = ["./", "./index.html", "./player.js"];
 
 self.addEventListener("install", (event) => {
