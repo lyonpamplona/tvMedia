@@ -452,6 +452,9 @@ class ScreenCreate(BaseModel):
         None, description="Template de layout (ex.: restaurante, recepcao, varejo)."
     )
     sync_group: str | None = Field(None, max_length=64, description="Grupo de sincronia.")
+    resolution: str | None = Field(None, max_length=16, description="Resolucao nativa, ex.: 1920x1080.")
+    orientation: str = Field("landscape", description="landscape ou portrait.")
+    size_inches: str | None = Field(None, max_length=8, description="Tamanho diagonal em polegadas.")
 
 
 class ScreenUpdate(BaseModel):
@@ -463,6 +466,9 @@ class ScreenUpdate(BaseModel):
     background_audio_id: int | None = Field(
         None, description="Midia de audio (tela inteira) tocada em loop."
     )
+    resolution: str | None = Field(None, max_length=16)
+    orientation: str | None = Field(None)
+    size_inches: str | None = Field(None, max_length=8)
 
 
 class ScreenRead(BaseModel):
@@ -475,6 +481,9 @@ class ScreenRead(BaseModel):
     slug: str
     pair_code: str | None = None
     sync_group: str | None = None
+    resolution: str | None = None
+    orientation: str = "landscape"
+    size_inches: str | None = None
     timezone: str
     created_at: datetime
     last_seen: datetime | None = None

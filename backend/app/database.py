@@ -102,7 +102,7 @@ def _run_sqlite_migrations() -> None:
         "media_folders": [("company_id", "INTEGER")],
         "media": [("company_id", "INTEGER")],
         "playlists": [("company_id", "INTEGER")],
-        "screens": [("pair_code", "VARCHAR(12)"), ("sync_group", "VARCHAR(64)")],
+        "screens": [("pair_code", "VARCHAR(12)"), ("sync_group", "VARCHAR(64)"), ("resolution", "VARCHAR(16)"), ("orientation", "VARCHAR(16) NOT NULL DEFAULT 'landscape'"), ("size_inches", "VARCHAR(8)")],
         "audit_logs": [("company_id", "INTEGER")],
         "play_events": [("company_id", "INTEGER")],
     }
