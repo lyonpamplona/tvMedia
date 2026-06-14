@@ -1,17 +1,21 @@
-"""Endpoints consumidos diretamente pelo player nas TVs.
+"""Endpoints públicos consumidos pelo player na TV.
 
 Inclui:
 
-* ``GET /api/display/{slug}`` — retorna o conteúdo resolvido da tela (a
-  playlist vinculada, com URLs absolutas e durações), pronto para reprodução.
-* ``WS  /ws/display/{slug}`` — canal WebSocket pelo qual o servidor avisa o
-  player para recarregar quando algo muda.
+* ``GET /api/display/{slug}`` — monta o payload de exibição resolvendo, para
+  cada zona, a playlist ativa no momento (considerando agendamentos e fuso da
+  tela). Também registra um "heartbeat" (``last_seen``).
+* ``POST /api/display/{slug}/events`` — recebe lotes de eventos de reprodução
+  (proof-of-play) reportados pelo player.
+* ``WS /ws/display/{slug}`` — canal de tempo real; o servidor envia
+  ``{"type": "reload"}`` quando o conteúdo da tela muda.
+
+Estes endpoints são públicos (sem autenticação): a TV só conhece o ``slug``.
+A montagem do payload foi extraída para :mod:`app.services`, de modo que a
+pré-visualização do painel use exatamente a mesma lógica do player.
 """
 
 from __future__ import annotations
-
-import hashlib
-from datetime import datetime, timezone
 
 from fastapi import (
     APIRouter,
@@ -23,126 +27,87 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
-from .. import crud, models, schemas
+from .. import crud, schemas, services
 from ..database import SessionLocal, get_db
 from ..websocket_manager import manager
 
 router = APIRouter(tags=["display"])
 
 
-def _media_to_display_item(
-    item: models.PlaylistItem, base_url: str
-) -> schemas.DisplayItem:
-    """Converte um item de playlist no formato consumido pelo player.
+@router.post("/api/display/pair", response_model=schemas.PairResponse)
+def pair_screen(data: schemas.PairRequest, db: Session = Depends(get_db)) -> schemas.PairResponse:
+    """Empareia uma TV a partir de um código numérico exibido na tela.
 
-    Resolve a URL pública de mídias baseadas em arquivo e repassa conteúdo
-    textual/HTML/URL conforme o tipo.
+    Fluxo para parque grande de TVs: o painel mostra o código de cada tela; ao
+    digitá-lo no dispositivo, ele recebe o ``slug`` e passa a tocar o conteúdo.
 
-    Args:
-        item: item de playlist com mídia carregada.
-        base_url: URL base do servidor (ex.: ``http://host:8000``).
-
-    Returns:
-        schemas.DisplayItem: item pronto para exibição.
+    Raises:
+        HTTPException: 404 quando o código não corresponde a nenhuma tela.
     """
-    media = item.media
-    url: str | None = None
-    content: str | None = None
-
-    if media.type in (models.MediaType.image, models.MediaType.video):
-        url = f"{base_url}/media/{media.path}"
-    elif media.type == models.MediaType.url:
-        url = media.source_url
-    else:  # text / html
-        content = media.content
-
-    return schemas.DisplayItem(
-        type=media.type,
-        duration=item.duration,
-        name=media.name,
-        url=url,
-        content=content,
-    )
-
-
-def _compute_revision(screen: models.Screen) -> str:
-    """Calcula um hash curto que muda sempre que a playlist da tela muda.
-
-    O player usa esse valor para evitar reinicializar a reprodução quando o
-    conteúdo não mudou de fato.
-
-    Args:
-        screen: tela com playlist (e itens) carregada.
-
-    Returns:
-        str: hash hexadecimal curto (12 caracteres).
-    """
-    parts: list[str] = [str(screen.id)]
-    if screen.playlist is not None:
-        parts.append(screen.playlist.updated_at.isoformat())
-        for item in screen.playlist.items:
-            parts.append(f"{item.id}:{item.position}:{item.duration}")
-    digest = hashlib.sha256("|".join(parts).encode()).hexdigest()
-    return digest[:12]
+    screen = crud.get_screen_by_code(db, data.code.strip())
+    if screen is None:
+        raise HTTPException(status_code=404, detail="Código de emparelhamento inválido.")
+    return schemas.PairResponse(slug=screen.slug, name=screen.name)
 
 
 @router.get("/api/display/{slug}", response_model=schemas.DisplayPayload)
 def get_display(
     slug: str, request: Request, db: Session = Depends(get_db)
 ) -> schemas.DisplayPayload:
-    """Retorna o conteúdo completo que o player deve reproduzir.
+    """Retorna o conteúdo resolvido de uma tela para o player.
 
-    Também atualiza ``last_seen`` da tela, funcionando como heartbeat.
-
-    Args:
-        slug: identificador público da tela.
-        request: requisição (usada para derivar a URL base).
-        db: sessão de banco injetada.
+    Resolve cada zona para a playlist ativa no momento (agendamento + fuso),
+    registra o heartbeat da tela e calcula a ``revision`` do conteúdo.
 
     Raises:
-        HTTPException: se a tela não existir.
+        HTTPException: 404 quando o ``slug`` não corresponde a uma tela.
     """
     screen = crud.get_screen_by_slug(db, slug)
     if screen is None:
         raise HTTPException(status_code=404, detail="Tela não encontrada.")
 
-    # Heartbeat: registra que a tela está online.
-    screen.last_seen = datetime.now(timezone.utc)
-    db.commit()
+    # Heartbeat: marca a tela como online.
+    crud.touch_screen_seen(db, screen)
 
-    base_url = str(request.base_url).rstrip("/")
-    items: list[schemas.DisplayItem] = []
-    playlist_name: str | None = None
+    return services.build_display_payload(str(request.base_url), db, screen)
 
-    if screen.playlist is not None:
-        playlist_name = screen.playlist.name
-        ordered = sorted(screen.playlist.items, key=lambda it: it.position)
-        items = [_media_to_display_item(it, base_url) for it in ordered]
 
-    return schemas.DisplayPayload(
-        screen=screen.slug,
-        playlist_name=playlist_name,
-        revision=_compute_revision(screen),
-        items=items,
+@router.post(
+    "/api/display/{slug}/events", response_model=dict, status_code=202
+)
+def report_events(
+    slug: str, batch: schemas.PlayEventBatch, db: Session = Depends(get_db)
+) -> dict:
+    """Recebe um lote de eventos de reprodução (proof-of-play) do player.
+
+    O player agrega os eventos em memória e os envia periodicamente para
+    reduzir o número de requisições. Endpoint público, idempotente o bastante
+    para a finalidade (apenas registra).
+
+    Raises:
+        HTTPException: 404 quando o ``slug`` não corresponde a uma tela.
+    """
+    screen = crud.get_screen_by_slug(db, slug)
+    if screen is None:
+        raise HTTPException(status_code=404, detail="Tela não encontrada.")
+    stored = crud.record_play_events(
+        db,
+        screen_slug=slug,
+        events=batch.events,
+        company_id=screen.company_id,
     )
+    return {"stored": stored}
 
 
 @router.websocket("/ws/display/{slug}")
 async def display_socket(websocket: WebSocket, slug: str) -> None:
-    """Canal WebSocket que mantém o player sincronizado em tempo real.
+    """Canal WebSocket que avisa o player quando a tela deve recarregar.
 
-    Fluxo:
-        1. Valida que a tela existe (encerra com código 4404 caso contrário).
-        2. Registra a conexão no :class:`ConnectionManager`.
-        3. Permanece ouvindo; mensagens recebidas do player (ex.: "ping") são
-           respondidas com "pong" para manter a conexão viva.
-        4. Ao desconectar, remove a conexão do gerenciador.
-
-    Args:
-        websocket: conexão WebSocket de entrada.
-        slug: identificador público da tela.
+    Valida o ``slug`` antes de aceitar, registra a conexão no gerenciador e
+    mantém um loop de ping/pong. Mensagens de difusão (``reload``) são enviadas
+    pelos helpers em :mod:`app.realtime` quando o conteúdo muda.
     """
-    # Valida a existência da tela usando uma sessão curta e independente.
+    # Valida o slug usando uma sessão própria (fora do ciclo de dependências).
     with SessionLocal() as db:
         screen = crud.get_screen_by_slug(db, slug)
         if screen is None:
@@ -153,6 +118,7 @@ async def display_socket(websocket: WebSocket, slug: str) -> None:
     try:
         while True:
             message = await websocket.receive_text()
+            # Responde ao keep-alive do cliente.
             if message == "ping":
                 await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect:

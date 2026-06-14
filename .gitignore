@@ -12,7 +12,7 @@ data/
 
 # Ambiente
 .env
-
+commitar.sh
 # Editores
 .vscode/
 .idea/
