@@ -12,6 +12,8 @@ continua sendo o endpoint REST de display.
 
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -27,6 +29,25 @@ async def notify_screen(slug: str, *, reason: str) -> None:
         reason: motivo da atualização (apenas para depuração/log no player).
     """
     await manager.broadcast(slug, {"type": "reload", "reason": reason})
+
+
+async def send_player_command(slug: str, command: models.PlayerCommand) -> None:
+    """Envia um comando operacional para o player de uma tela."""
+    payload = None
+    if command.payload:
+        try:
+            payload = json.loads(command.payload)
+        except json.JSONDecodeError:
+            payload = None
+    await manager.broadcast(
+        slug,
+        {
+            "type": "command",
+            "command_id": command.id,
+            "command": command.command_type,
+            "payload": payload,
+        },
+    )
 
 
 async def notify_playlist_screens(

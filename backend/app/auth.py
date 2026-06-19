@@ -24,12 +24,13 @@ import hmac
 import json
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from . import models
+from . import crud, models
 from .config import settings
 from .database import get_db
 
@@ -109,7 +110,24 @@ def get_current_user(
     """
     if credentials is None:
         raise _unauthorized()
-    payload = _decode_token(credentials.credentials)
+    raw_token = credentials.credentials
+    if raw_token.startswith("tvma_"):
+        api_token = crud.get_api_token_by_secret(db, raw_token)
+        if api_token is None or not api_token.is_active:
+            raise _unauthorized()
+        if api_token.expires_at is not None:
+            exp = api_token.expires_at
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp <= datetime.now(timezone.utc):
+                raise _unauthorized("Token de API expirado.")
+        user = db.get(models.User, api_token.user_id)
+        if user is None or not user.is_active:
+            raise _unauthorized()
+        crud.touch_api_token(db, api_token)
+        return user
+
+    payload = _decode_token(raw_token)
     if payload is None:
         raise _unauthorized()
     user = db.get(models.User, int(payload.get("sub", 0)))

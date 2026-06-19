@@ -10,4 +10,4 @@ Este pacote concentra toda a lógica do servidor responsável por:
 A versão semântica do pacote é exposta em :data:`__version__`.
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"

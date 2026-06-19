@@ -1,180 +1,111 @@
-# 📺 tvMedia — Sinalização digital autohospedada
+<p align="center">
+  <img src="docs/assets/tvmedia-signal.svg" width="128" alt="tvMedia signal" />
+</p>
 
-Sistema completo para exibir propagandas em TVs de lojas e comércios. Edite o
-conteúdo no painel e ele aparece **na hora** nas telas, via WebSocket.
+# tvMedia Studio
 
-- **Backend:** Python + FastAPI + SQLAlchemy (SQLite por padrão)
-- **Frontend:** painel administrativo e player em HTML/CSS/JS puro (sem build)
-- **Tempo real:** WebSocket avisa as TVs para recarregar quando algo muda
-- **Autohospedado:** Docker + Docker Compose, um único container
+**CMS autohospedado para sinalizacao digital**, com painel web, player para TVs,
+WebSocket em tempo real, proof-of-play, campanhas, DataSets, widgets e controles
+operacionais para uso em lojas, recepcoes, redes internas e ambientes self-hosted.
 
-### Recursos (v2)
+O projeto roda como um unico backend FastAPI que tambem serve o painel admin, o
+player e os arquivos de midia. O frontend e HTML/CSS/JS puro, sem etapa de build.
 
-- 🔐 **Login no painel** (senha única + token de sessão assinado)
-- 🗂️ **Múltiplas zonas por tela** (ex.: conteúdo principal + faixa de notícias)
-- ⏰ **Agendamento** de playlists por dia da semana e faixa de horário
-- 🎬 **Transições** (fade/slide/none) e **modo de ajuste** (contain/cover/fill)
-- ▶️ **YouTube e música**: vídeos/playlists do YouTube e embeds do Spotify,
-  com **controle de som por item** (mudo por padrão)
+## Visao Rapida
 
-### Reprodução de vídeo e áudio (autoplay)
+| Camada | Papel |
+|---|---|
+| Backend | FastAPI, SQLAlchemy, SQLite/PostgreSQL, API REST, WebSocket, tarefas em background |
+| Admin | Studio visual para midias, playlists, telas, zonas, campanhas, BI e seguranca |
+| Player | Aplicacao fullscreen para TV/kiosk que consome `/api/display/{slug}` |
+| Infra | Docker Compose, backups SQLite, healthcheck, variaveis por `.env` |
 
-- Vídeos enviados (`video`) e do YouTube reproduzem em loop automaticamente.
-- Por padrão os itens iniciam **sem som** (`mudo`), pois a maioria dos navegadores
-  bloqueia autoplay com áudio. Para tocar música/vídeo **com som** na TV:
-  1. Desmarque "mudo" no item (no painel), e
-  2. Inicie o navegador da TV em modo quiosque permitindo autoplay, ex.:
-     `chromium --kiosk --autoplay-policy=no-user-gesture-required "http://SERVIDOR:8000/player/?screen=SLUG"`
-- Para YouTube, cole o link normal (`watch?v=`, `youtu.be/...` ou `playlist?list=...`);
-  o sistema converte para o embed correto. Para Spotify, cole o link de
-  compartilhamento da faixa/álbum/playlist.
+## Recursos
 
----
+- Autenticacao por usuario/senha, papeis, super admin, multiempresa e 2FA TOTP.
+- Tokens Bearer pessoais (`tvma_...`) para integracoes externas.
+- Mídias: imagem, video, texto, HTML, URL, YouTube, audio, HLS, PDF e widgets.
+- Playlists com ordenacao, duracao, transicao, som, validade e limite por hora.
+- Telas com zonas, temas, overlays, background audio, publicacao e trava de layout.
+- Agendamentos por dia/horario, campanhas, grupos de telas e comandos ao player.
+- DataSets internos, CSV colado e JSON remoto para widgets dinamicos.
+- Proof-of-play, resumo BI, exportacao CSV e relatorios agendados por e-mail.
+- Alertas de tela offline por webhook/SMTP e backup automatico SQLite.
 
-## Arquitetura
+## Como Rodar
 
-```
-adsignage/
-├── backend/
-│   ├── app/
-│   │   ├── __init__.py            # versão do pacote
-│   │   ├── config.py              # configurações via variáveis de ambiente
-│   │   ├── database.py            # engine, sessão e init do banco
-│   │   ├── models.py              # ORM: Media, Playlist, Item, Screen, Zone, Schedule
-│   │   ├── schemas.py             # DTOs Pydantic (entrada/saída)
-│   │   ├── crud.py                # acesso a dados + resolução de agendamento
-│   │   ├── auth.py                # login por senha + token HMAC
-│   │   ├── websocket_manager.py   # registro de conexões WebSocket por tela
-│   │   ├── realtime.py            # notificações "reload" para as telas
-│   │   ├── main.py                # app FastAPI + arquivos estáticos
-│   │   └── routers/
-│   │       ├── auth.py            # login
-│   │       ├── media.py           # CRUD + upload de mídias
-│   │       ├── playlists.py       # CRUD de playlists e itens
-│   │       ├── screens.py         # CRUD de telas (TVs)
-│   │       ├── zones.py           # CRUD de zonas
-│   │       ├── schedules.py       # CRUD de agendamentos
-│   │       └── display.py         # payload do player + WebSocket
-│   ├── requirements.txt
-│   └── Dockerfile
-├── frontend/
-│   ├── admin/                     # painel de administração
-│   │   ├── index.html
-│   │   ├── styles.css
-│   │   └── app.js
-│   └── player/                    # player exibido na TV
-│       ├── index.html
-│       └── player.js
-├── docker-compose.yml
-├── .env.example
-└── README.md
-```
-
-### Modelo de dados
-
-- **Media** — conteúdo exibível: `image`, `video`, `text`, `html`, `url`,
-  `youtube` (vídeo ou playlist) ou `embed` (Spotify e outros players).
-- **Playlist** — sequência ordenada de itens, reproduzida em loop.
-- **PlaylistItem** — liga uma mídia a uma playlist, com `position`, `duration`,
-  `fit` (contain/cover/fill) e `transition` (fade/slide/none).
-- **Screen** — uma TV, identificada por um `slug` público, com seu `timezone`.
-- **Zone** — região retangular (em %) dentro de uma tela, com playlist padrão.
-  Uma tela simples tem uma única zona cobrindo 100%.
-- **Schedule** — regra que troca a playlist de uma zona por dia/horário.
-
-### Como o "tempo real" funciona
-
-1. O player na TV abre `WS /ws/display/{slug}` e fica conectado.
-2. Qualquer alteração no painel chama os helpers em `realtime.py`, que enviam
-   `{"type": "reload"}` às telas afetadas.
-3. O player recebe a mensagem e busca novamente `GET /api/display/{slug}`.
-4. Se a `revision` mudou, ele reinicia a reprodução com o novo conteúdo.
-
-Para agendamentos, o player também revalida sozinho a cada 60s, garantindo a
-troca de playlist no horário mesmo sem um evento explícito.
-
-### Como o agendamento é resolvido
-
-A cada requisição de exibição, para cada zona o backend avalia os agendamentos
-no fuso da tela: dentre os que casam com o dia da semana e a faixa de horário
-atual, vence o de **maior prioridade**. Sem agendamento ativo, usa-se a
-**playlist padrão** da zona.
-
----
-
-## Como rodar
-
-### Opção A — Docker (recomendado, autohospedado)
+### Docker Compose
 
 ```bash
-cp .env.example .env   # ajuste ADMIN_PASSWORD e SECRET_KEY!
+cp .env.example .env
+# edite ADMIN_PASSWORD, SECRET_KEY e CORS_ORIGINS antes de producao
 docker compose up --build -d
 ```
 
-Depois acesse:
+Acesse:
 
-- **Painel:** http://SEU_SERVIDOR:8000/admin/  (senha = `ADMIN_PASSWORD`)
-- **API docs:** http://SEU_SERVIDOR:8000/docs
+- Painel: `http://localhost:8000/admin/`
+- Player: `http://localhost:8000/player/?screen=SLUG`
+- API docs: `http://localhost:8000/docs`
+- Healthcheck: `http://localhost:8000/api/health`
 
-### Opção B — Local (desenvolvimento)
+### Desenvolvimento Local
 
 ```bash
 cd backend
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
----
+## Primeiro Uso
 
-## Passo a passo de uso
+1. Copie `.env.example` para `.env` e troque `ADMIN_PASSWORD` e `SECRET_KEY`.
+2. Suba o sistema.
+3. Entre no admin em `/admin/`.
+4. Crie midias e uma playlist.
+5. Crie uma tela, vincule a playlist na zona principal e copie a URL do player.
+6. Abra a URL do player na TV/navegador kiosk.
+7. Edite no painel: o player recebe WebSocket e recarrega quando a revisao muda.
 
-1. Acesse `/admin/` e entre com a senha (`ADMIN_PASSWORD`).
-2. Aba **Mídias**: envie imagens/vídeos ou crie blocos de texto/HTML/URL.
-3. Aba **Playlists**: crie uma playlist e adicione itens (defina duração, ajuste
-   e transição de cada um).
-4. Aba **Telas**: crie uma tela, defina a playlist padrão da zona principal e,
-   se quiser, adicione **zonas** e **agendamentos**. Copie a **URL do player**.
-5. Na TV, abra `http://SEU_SERVIDOR:8000/player/?screen=SLUG` em tela cheia.
-6. Volte ao painel e edite — a TV atualiza **instantaneamente**. ✅
+## Documentacao
 
-> Dica para TVs: use o navegador em modo quiosque (fullscreen). Em vídeo o
-> player usa `muted` para permitir autoplay sem interação.
+- [Arquitetura](docs/ARQUITETURA.md)
+- [Fluxos do sistema](docs/FLUXOS.md)
+- [Modulos do codigo](docs/MODULOS.md)
+- [API tecnica](docs/API_TECNICA.md)
+- [Configuracao e dependencias](docs/CONFIGURACAO.md)
+- [Tutorial de uso](docs/TUTORIAL_USO.md)
+- [Comandos operacionais](docs/COMANDOS.md)
+- [Auditoria do codigo](docs/AUDITORIA_CODIGO.md)
+- [Roadmap corretivo](docs/ROADMAP_CORRETIVO.md)
+- [Git e GitHub](docs/GIT_GITHUB.md)
+- [Pagina HTML de apresentacao](docs/APRESENTACAO.html)
 
----
+## Verificacao
 
-## Endpoints principais
+```bash
+python -m compileall -q backend\app
+node --check frontend\admin\app.js
+node --check frontend\player\player.js
+python -m pytest
+```
 
-| Método | Rota | Auth | Descrição |
-|--------|------|------|-----------|
-| POST | `/api/auth/login` | — | Login (retorna token) |
-| GET | `/api/health` | — | Healthcheck |
-| GET/POST | `/api/media` | ✅ | Listar / criar mídia (texto/html/url) |
-| POST | `/api/media/upload` | ✅ | Upload de imagem/vídeo (multipart) |
-| PATCH/DELETE | `/api/media/{id}` | ✅ | Atualizar / excluir mídia |
-| GET/POST | `/api/playlists` | ✅ | Listar / criar playlists |
-| POST | `/api/playlists/{id}/items` | ✅ | Adicionar item (fit/transição) |
-| POST | `/api/playlists/{id}/reorder` | ✅ | Reordenar itens |
-| GET/POST | `/api/screens` | ✅ | Listar / criar telas |
-| POST | `/api/screens/{id}/zones` | ✅ | Criar zona |
-| PATCH/DELETE | `/api/screens/{id}/zones/{zid}` | ✅ | Atualizar / remover zona |
-| POST | `/api/zones/{zid}/schedules` | ✅ | Criar agendamento |
-| DELETE | `/api/zones/{zid}/schedules/{sid}` | ✅ | Remover agendamento |
-| GET | `/api/display/{slug}` | — | Conteúdo resolvido para o player |
-| WS | `/ws/display/{slug}` | — | Canal de atualização em tempo real |
+Estado desta varredura: `7 passed, 11 skipped` no ambiente local atual. Os
+skips ocorrem quando FastAPI/SQLAlchemy nao estao instalados no ambiente de
+execucao dos testes.
 
----
+## Producao
 
-## Segurança
+- Use `ENVIRONMENT=production`.
+- Defina `SECRET_KEY` forte e `ADMIN_PASSWORD` fora dos valores padrao.
+- Restrinja `CORS_ORIGINS` a origem HTTPS publica.
+- Coloque atras de proxy reverso HTTPS (Caddy/Nginx/Traefik).
+- Ative `FORCE_HTTPS=true` apenas quando o proxy/headers estiverem corretos.
+- Configure backup, SMTP e politica de retencao conforme o ambiente.
 
-- **Troque** `ADMIN_PASSWORD` e `SECRET_KEY` antes de expor à internet.
-- O player e o WebSocket são públicos por design (a TV só conhece o `slug`);
-  trate o `slug` como um segredo de baixa sensibilidade.
-- Para produção, coloque atrás de um proxy HTTPS (Caddy, Nginx, Cloudflare).
+## Licenca
 
-## Próximos passos sugeridos
-
-- **PostgreSQL** em produção (basta trocar `DATABASE_URL`).
-- **Arrastar para reordenar** itens da playlist no painel.
-- **Pré-visualização** ao vivo das zonas no editor.
-- **Múltiplos usuários** e papéis (admin/operador).
+Nao ha arquivo de licenca publicado neste checkout. Antes de abrir o repositorio
+publicamente, defina a licenca desejada e inclua `LICENSE`.

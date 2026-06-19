@@ -1,91 +1,91 @@
-# tvMedia — Relatório Técnico
+# Relatorio Tecnico - tvMedia Studio v35
 
-**Data:** 12/06/2026  
-**Escopo:** varredura completa de backend, frontend e infraestrutura.  
-**Versão analisada:** estado atual do repositório `/data/adsignage`.
+**Data:** 18/06/2026  
+**Escopo:** varredura completa de backend, frontend, player, infra, docs, Git/GitHub e roadmap.  
+**Base analisada:** `C:\Users\lyon\Downloads\tvMedia-v35 (1)`.
 
----
+## Veredito
 
-## 1. Veredito geral
+O sistema esta **funcional e coerente para uso self-hosted/interno**. As fases
+P3 a P8 estao aplicadas no codigo, incluindo organizacao de biblioteca, gestao
+de telas, DataSets/widgets, campanhas, BI, 2FA, API tokens e backups.
 
-**O sistema está APTO para uso** em cenário self-hosted/MVP (rede local ou interna de loja, instância única em Raspberry Pi 4). O backend compila sem erros, a arquitetura está coesa e o fluxo principal (cadastro de mídia → playlists → zonas → agendamento → exibição em tempo real via WebSocket) está completo e funcional.
+Para exposicao publica, ainda ha trabalho de endurecimento: aplicar escopos
+reais nos tokens de API, proteger fetches remotos contra SSRF, adicionar CSP e
+ampliar testes de API.
 
-**Ressalva:** para exposição direta à internet pública, há ajustes de segurança recomendados (seção 4). Nenhum deles bloqueia o uso interno imediato.
+## Validacao Executada
 
-| Dimensão | Status |
+| Check | Resultado |
 |---|---|
-| Compilação backend | OK |
-| Fluxo funcional principal | Completo |
-| Tempo real (WebSocket) | Funcional |
-| Segurança para uso interno | Adequada |
-| Segurança para internet pública | Requer ajustes |
-| Testes automatizados | Ausentes |
-| Migrações de banco | Ausentes (apenas create_all) |
+| `python -m compileall -q backend\app` | OK |
+| `node --check frontend\admin\app.js` | OK |
+| `node --check frontend\player\player.js` | OK |
+| `python -m pytest` | `7 passed, 11 skipped` |
 
----
+Os skips locais ocorrem quando FastAPI/SQLAlchemy nao estao instalados no
+ambiente de execucao. O workflow GitHub Actions instala dependencias antes de
+rodar a suite.
 
-## 2. Correções aplicadas nesta varredura
+## Estado por Camada
 
-### 2.1 `realtime.py` — função `notify_playlist_screens` (corrigida)
-A função consultava `models.Screen.playlist_id`, atributo que **não existe** no modelo `Screen` (a relação playlist→tela é indireta, via zonas e agendamentos). Era código sem chamadas ativas, mas geraria `AttributeError` se utilizada. Foi reescrita para resolver corretamente as telas afetadas, percorrendo `Zone.default_playlist_id` e `Schedule.playlist_id` (com `DISTINCT`).
+### Backend
 
-### 2.2 `embeds.py` — verificação (sem alteração necessária)
-As f-strings de YouTube e Spotify foram auditadas byte a byte. Estão **corretas**: produzem URLs limpas como `https://www.youtube.com/embed/VIDEO_ID`. A suspeita inicial de chaves duplicadas era um artefato de exibição do terminal, não um defeito real do código.
+- FastAPI com routers registrados em `main.py`.
+- SQLAlchemy com SQLite padrao e suporte a PostgreSQL por `DATABASE_URL`.
+- Configuracao centralizada em `config.py`, com validacao de segredos em producao.
+- Autenticacao HMAC, papeis, multiempresa, 2FA TOTP e tokens pessoais de API.
+- Tarefas de backup, alertas offline e relatorios agendados no lifespan.
+- Docstrings em portugues presentes nos modulos principais.
 
----
+### Admin
 
-## 3. Estado por camada
+- PWA estatica sem build.
+- Studio visual para midias, playlists, telas, zonas, agendas, campanhas,
+  DataSets, BI, usuarios, auditoria, seguranca e backups.
+- Monolitico em `frontend/admin/app.js`, o que e aceitavel para a estrategia
+  sem build, mas deve ser modularizado no roadmap corretivo.
 
-### Backend (FastAPI, ~2.300 linhas)
-- **Estrutura:** `main.py` (app + CORS + routers + arquivos estáticos), `auth.py`, `config.py`, `crud.py`, `models.py`, `database.py`, `embeds.py`, `realtime.py`, `websocket_manager.py`, `schemas.py` e 7 routers (auth, media, playlists, screens, zones, schedules, display).
-- **Modelos:** Screen, Zone, Schedule, Playlist, PlaylistItem, Media. Slugs gerados com `secrets.token_urlsafe`. Resolução de playlist ativa por dia/horário com prioridade e fallback para playlist padrão da zona — lógica sólida.
-- **Banco:** SQLite com PRAGMAs bem ajustados para RPi4 (WAL, busy_timeout, cache, mmap), pool configurado. Apenas `create_all` — sem versionamento de schema.
-- **Tempo real:** WebSocket por tela (`/ws/display/{slug}`) com ping/pong e broadcast de recarga. Edições no admin disparam `notify_all_screens` — atualização ao vivo funciona.
+### Player
 
-### Frontend (admin + player)
-- **Player:** consome `/api/display/{slug}`, renderiza zonas posicionadas, faz reconexão WebSocket e troca de mídia com transições. Computa revisão (hash) para evitar recargas desnecessárias.
-- **Admin:** IDE estilo Tokyo Night, com onboarding/tutorial, toasts, diálogos customizados e gestão de mídia/playlists/zonas/agendamentos.
+- Busca `/api/display/{slug}` e conecta em `/ws/display/{slug}`.
+- Renderiza zonas, midias, widgets, overlays, HLS, YouTube e background audio.
+- Registra proof-of-play e responde comandos do CMS.
+- Usa polling como fallback ao WebSocket.
 
-### Infraestrutura
-- Docker `python:3.12-slim`, uvicorn 1 worker com limites de concorrência, `docker-compose` com `mem_limit` 512m, volume persistente, frontend montado read-only e healthcheck em `/api/health`. Adequado ao alvo RPi4 ARM64 4GB.
+### Infra
 
----
+- Docker Compose com container unico.
+- `.env.example` atualizado para seguranca, CORS, processamento, backup e BI.
+- `.gitignore`, `.gitattributes`, `pytest.ini` e CI GitHub Actions adicionados.
 
-## 4. Ajustes recomendados (segurança e robustez)
+## Achados Criticos
 
-Ordenados por prioridade.
+1. **API token com escopos nao aplicados**  
+   O campo `scopes` existe, mas as rotas ainda nao bloqueiam escrita/admin por
+   escopo. Corrigir antes de expor tokens a integracoes externas.
 
-**Alta — antes de expor à internet pública:**
-1. **CORS:** hoje usa `allow_origins=["*"]` combinado com `allow_credentials=True`. Essa combinação é inválida para navegadores e amplia superfície a CSRF. Defina origens explícitas via `CORS_ORIGINS`.
-2. **Credenciais padrão:** `ADMIN_PASSWORD=admin` e `SECRET_KEY` padrão devem ser obrigatoriamente trocados; idealmente, recusar inicialização com valores default em modo produção.
-3. **Rate-limit no login:** atualmente não há proteção contra força bruta. Adicionar limite por IP/tentativas.
+2. **SSRF em fontes remotas**  
+   Importacao por URL, DataSets JSON e widgets externos devem bloquear IPs
+   privados, localhost e metadata services.
 
-**Média:**
-4. **Migrações de schema:** adotar Alembic. Hoje qualquer mudança de modelo exige recriar o banco manualmente.
-5. **Validação de upload:** a checagem é só por extensão. Validar tipo real (mime/conteúdo) além do limite de 200 MB já existente.
-6. **Sanitização de mídia HTML/texto:** conteúdo `html`/`text` é injetado no player; mesmo sendo admin-only, sanitizar para evitar XSS.
-7. **Testes automatizados:** não há cobertura. Começar por testes de `crud.resolve_active_playlist_id`, autenticação e endpoints de display.
+3. **CSP ausente**  
+   Headers basicos existem, mas falta Content-Security-Policy por superficie
+   (`admin` e `player`).
 
-**Baixa:**
-8. **Paginação** nas listagens (mídia/playlists) para escalar o volume.
-9. **Token de autenticação:** o HMAC próprio funciona, mas considerar biblioteca madura (JWT) com revogação/refresh.
-10. **Backups automáticos** do SQLite + pasta de mídia.
+## Melhorias Aplicadas Nesta Rodada
 
----
+- README raiz reescrito e personalizado.
+- Documentacao tecnica criada em `docs/`.
+- Pagina HTML de apresentacao criada.
+- Roadmap corretivo criado.
+- Compose ajustado para nao forcar CORS `*`.
+- `.env.example` documenta variaveis que ja existiam no codigo.
+- Git/GitHub configurados com ignore, attributes e CI.
+- `pytest.ini` evita cache ruidoso no ambiente local.
 
-## 5. Funções novas sugeridas
+## Conclusao
 
-- **Painel de saúde das telas:** já existe `last_seen`; expor status online/offline e último contato no admin.
-- **Pré-visualização ao vivo** do layout de zonas no editor antes de publicar.
-- **Agendamento por data específica** (campanhas com início/fim), além do atual por dia da semana + minutos.
-- **Biblioteca de mídia** com pastas, tags e busca.
-- **Proof-of-play / métricas de exibição** (o que tocou, quando, em qual tela).
-- **Auditoria/logs** de alterações por usuário.
-- **Multiusuário com papéis** (admin/operador).
-- **Importação em massa** de mídia.
-
----
-
-## 6. Conclusão
-
-O código está **pronto para uso interno** e bem organizado. Para produção exposta publicamente, priorize os três itens de alta prioridade (CORS, credenciais, rate-limit). As demais recomendações são incrementos de robustez e escala, não bloqueios.
+O codigo esta em bom estado para seguir evoluindo. A proxima frente recomendada
+e aplicar o `docs/ROADMAP_CORRETIVO.md`, iniciando por escopos de API token e
+protecao SSRF.

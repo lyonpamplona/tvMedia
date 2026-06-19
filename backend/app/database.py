@@ -98,15 +98,20 @@ def _run_sqlite_migrations() -> None:
     import secrets
 
     additions = {
-        "users": [("company_id", "INTEGER"), ("is_super_admin", "BOOLEAN NOT NULL DEFAULT 0")],
+        "users": [("company_id", "INTEGER"), ("is_super_admin", "BOOLEAN NOT NULL DEFAULT 0"), ("totp_secret", "VARCHAR(64)"), ("totp_enabled", "BOOLEAN NOT NULL DEFAULT 0")],
+        "api_tokens": [("company_id", "INTEGER"), ("expires_at", "DATETIME"), ("last_used_at", "DATETIME")],
         "media_folders": [("company_id", "INTEGER")],
-        "media": [("company_id", "INTEGER"), ("width", "INTEGER"), ("height", "INTEGER"), ("optimized_path", "VARCHAR(512)"), ("poster_path", "VARCHAR(512)"), ("processing_status", "VARCHAR(16) NOT NULL DEFAULT 'pending'"), ("processing_note", "TEXT")],
-        "playlists": [("company_id", "INTEGER")],
-        "playlist_items": [("focal", "VARCHAR(16) NOT NULL DEFAULT 'center'"), ("play_full", "BOOLEAN NOT NULL DEFAULT 0")],
+        "media": [("company_id", "INTEGER"), ("width", "INTEGER"), ("height", "INTEGER"), ("optimized_path", "VARCHAR(512)"), ("poster_path", "VARCHAR(512)"), ("processing_status", "VARCHAR(16) NOT NULL DEFAULT 'pending'"), ("processing_note", "TEXT"), ("expires_at", "DATETIME"), ("collect_stats", "BOOLEAN NOT NULL DEFAULT 1")],
+        "playlist_folders": [("company_id", "INTEGER")],
+        "playlists": [("company_id", "INTEGER"), ("tags", "VARCHAR(512)"), ("folder_id", "INTEGER")],
+        "playlist_items": [("focal", "VARCHAR(16) NOT NULL DEFAULT 'center'"), ("play_full", "BOOLEAN NOT NULL DEFAULT 0"), ("start_at", "DATETIME"), ("end_at", "DATETIME"), ("max_plays_per_hour", "INTEGER")],
         "companies": [("emergency_message", "TEXT"), ("emergency_active", "BOOLEAN NOT NULL DEFAULT 0")],
-        "screens": [("pair_code", "VARCHAR(12)"), ("sync_group", "VARCHAR(64)"), ("resolution", "VARCHAR(16)"), ("orientation", "VARCHAR(16) NOT NULL DEFAULT 'landscape'"), ("size_inches", "VARCHAR(8)"), ("theme_bg", "VARCHAR(16)"), ("theme_text", "VARCHAR(16)"), ("theme_accent", "VARCHAR(16)"), ("theme_ticker_bg", "VARCHAR(16)"), ("theme_ticker_text", "VARCHAR(16)")],
+        "screens": [("pair_code", "VARCHAR(12)"), ("sync_group", "VARCHAR(64)"), ("publish_status", "VARCHAR(16) NOT NULL DEFAULT 'published'"), ("publish_at", "DATETIME"), ("published_at", "DATETIME"), ("layout_locked", "BOOLEAN NOT NULL DEFAULT 0"), ("collect_stats", "BOOLEAN NOT NULL DEFAULT 1"), ("tags", "VARCHAR(512)"), ("location_label", "VARCHAR(255)"), ("latitude", "FLOAT"), ("longitude", "FLOAT"), ("resolution", "VARCHAR(16)"), ("orientation", "VARCHAR(16) NOT NULL DEFAULT 'landscape'"), ("size_inches", "VARCHAR(8)"), ("theme_bg", "VARCHAR(16)"), ("theme_text", "VARCHAR(16)"), ("theme_accent", "VARCHAR(16)"), ("theme_ticker_bg", "VARCHAR(16)"), ("theme_ticker_text", "VARCHAR(16)")],
+        "campaigns": [("mode", "VARCHAR(16) NOT NULL DEFAULT 'scheduled'"), ("screen_ids", "TEXT"), ("screen_group_ids", "TEXT"), ("zone_ids", "TEXT"), ("start_at", "DATETIME"), ("end_at", "DATETIME"), ("priority", "INTEGER NOT NULL DEFAULT 0"), ("enabled", "BOOLEAN NOT NULL DEFAULT 1"), ("max_plays_per_hour", "INTEGER"), ("company_id", "INTEGER"), ("updated_at", "DATETIME")],
+        "datasets": [("kind", "VARCHAR(24) NOT NULL DEFAULT 'table'"), ("source_url", "VARCHAR(1024)"), ("columns", "TEXT"), ("rows", "TEXT"), ("fallback_rows", "TEXT"), ("refresh_status", "VARCHAR(16) NOT NULL DEFAULT 'idle'"), ("refresh_note", "TEXT"), ("last_refresh_at", "DATETIME"), ("expires_at", "DATETIME"), ("company_id", "INTEGER"), ("updated_at", "DATETIME")],
         "audit_logs": [("company_id", "INTEGER")],
         "play_events": [("company_id", "INTEGER")],
+        "report_schedules": [("recipients", "TEXT NOT NULL DEFAULT ''"), ("frequency", "VARCHAR(16) NOT NULL DEFAULT 'daily'"), ("hour", "INTEGER NOT NULL DEFAULT 8"), ("days", "INTEGER NOT NULL DEFAULT 7"), ("screen_slug", "VARCHAR(32)"), ("enabled", "BOOLEAN NOT NULL DEFAULT 1"), ("last_sent_at", "DATETIME"), ("company_id", "INTEGER"), ("updated_at", "DATETIME")],
     }
 
     with engine.begin() as conn:

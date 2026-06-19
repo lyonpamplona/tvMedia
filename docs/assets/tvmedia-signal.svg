@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 220" role="img" aria-labelledby="title desc">
+  <title id="title">tvMedia signal</title>
+  <desc id="desc">Tela com ondas animadas representando sinalizacao digital em tempo real.</desc>
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#15c8a8"/>
+      <stop offset="0.52" stop-color="#4f8cff"/>
+      <stop offset="1" stop-color="#f4c95d"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="220" height="220" rx="42" fill="#10131f"/>
+  <rect x="38" y="52" width="144" height="92" rx="14" fill="#171b2d" stroke="url(#g)" stroke-width="5"/>
+  <rect x="54" y="68" width="52" height="22" rx="6" fill="#15c8a8">
+    <animate attributeName="opacity" values="0.45;1;0.45" dur="2.2s" repeatCount="indefinite"/>
+  </rect>
+  <rect x="54" y="101" width="108" height="10" rx="5" fill="#4f8cff">
+    <animate attributeName="width" values="68;108;68" dur="2.8s" repeatCount="indefinite"/>
+  </rect>
+  <rect x="54" y="121" width="84" height="8" rx="4" fill="#f4c95d">
+    <animate attributeName="width" values="84;48;84" dur="2.4s" repeatCount="indefinite"/>
+  </rect>
+  <path d="M82 166h56M110 144v22" stroke="#dfe7ff" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="170" cy="52" r="7" fill="#15c8a8" filter="url(#glow)">
+    <animate attributeName="r" values="5;9;5" dur="1.8s" repeatCount="indefinite"/>
+  </circle>
+  <path d="M160 34c16 7 26 19 30 35" fill="none" stroke="#15c8a8" stroke-width="5" stroke-linecap="round" opacity=".75">
+    <animate attributeName="opacity" values=".25;.9;.25" dur="1.8s" repeatCount="indefinite"/>
+  </path>
+  <path d="M151 21c29 11 47 33 53 63" fill="none" stroke="#4f8cff" stroke-width="5" stroke-linecap="round" opacity=".55">
+    <animate attributeName="opacity" values=".15;.7;.15" dur="2.4s" repeatCount="indefinite"/>
+  </path>
+</svg>

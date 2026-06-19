@@ -51,6 +51,7 @@
     down: S('<path d="m6 9 6 6 6-6"/>'),
     power: S('<path d="M12 2v10M18.4 6.6a9 9 0 1 1-12.8 0"/>'),
     upload: S('<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>'),
+    download: S('<path d="M12 4v12M7 11l5 5 5-5M5 20h14"/>'),
     folder: S('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
     user: S('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'),
     shield: S('<path d="M12 3 4 6v6c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V6z"/>'),
@@ -58,9 +59,9 @@
     tag: S('<path d="M3 3h8l10 10-8 8L3 11z"/><circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" stroke="none"/>'),
   };
 
-  const TYPE_ICON = { image: "image", video: "video", text: "text", html: "code", url: "link", youtube: "youtube", embed: "music", audio: "music", clock: "clock", weather: "sun", news: "text", promo: "tag", countdown: "clock", qrcode: "layout", rates: "tag", live: "video" };
-  const TYPE_LABEL = { image: "Imagem", video: "Video", text: "Texto", html: "HTML", url: "URL", youtube: "YouTube", embed: "Embed", audio: "Audio", clock: "Relogio", weather: "Clima", news: "Noticias", promo: "Promocoes", countdown: "Contagem", qrcode: "QR Code", rates: "Cotacoes", live: "Ao vivo (HLS)" };
-  const WIDGET_TYPES = ["clock", "weather", "news", "promo", "countdown", "qrcode", "rates"];
+  const TYPE_ICON = { image: "image", video: "video", text: "text", html: "code", url: "link", youtube: "youtube", embed: "music", audio: "music", clock: "clock", weather: "sun", news: "text", promo: "tag", countdown: "clock", qrcode: "layout", rates: "tag", live: "video", pdf: "code", webpage: "link", worldclock: "clock", calendar: "layout", stocks: "tag", menuboard: "playlist", dataset: "terminal" };
+  const TYPE_LABEL = { image: "Imagem", video: "Video", text: "Texto", html: "HTML", url: "URL", youtube: "YouTube", embed: "Embed", audio: "Audio", clock: "Relogio", weather: "Clima", news: "Noticias", promo: "Promocoes", countdown: "Contagem", qrcode: "QR Code", rates: "Cotacoes", live: "Ao vivo (HLS)", pdf: "PDF", webpage: "Pagina web", worldclock: "Relogio mundial", calendar: "Calendario", stocks: "Acoes", menuboard: "Menu board", dataset: "DataSet" };
+  const WIDGET_TYPES = ["clock", "weather", "news", "promo", "countdown", "qrcode", "rates", "worldclock", "calendar", "stocks", "menuboard", "dataset"];
   // Modelos prontos de conteudo para acelerar a criacao de textos/cartazes.
   const MEDIA_TEMPLATES = {
     promo: { label: "Promocao", text: "OFERTA ESPECIAL\n50% OFF\nSomente hoje. Aproveite!", html: '<div style="text-align:center;color:#fff;font-family:system-ui"><div style="font-size:3vmin;letter-spacing:.3em;color:#7aa2f7">OFERTA ESPECIAL</div><div style="font-size:12vmin;font-weight:800;line-height:1">50% OFF</div><div style="font-size:3.5vmin;margin-top:2vmin">Somente hoje. Aproveite!</div></div>' },
@@ -91,10 +92,16 @@
     playlists: [],
     screens: [],
     folders: [],
+    playlistFolders: [],
+    datasets: [],
+    campaigns: [],
+    screenGroups: [],
     users: [],
     user: null,
     mediaQuery: "",
     mediaFolder: "all",
+    playlistQuery: "",
+    playlistFolder: "all",
     activeSection: "screens",
     activeScreenId: null,
     selectedZoneId: null,
@@ -144,15 +151,42 @@
   async function loadMedia() { state.media = await api("/api/media"); }
   async function loadPlaylists() { state.playlists = await api("/api/playlists"); }
   async function loadScreens() { state.screens = await api("/api/screens"); }
+  async function loadPlaylistFolders() { return api("/api/playlists/folders"); }
 
   // Endpoints novos (analytics, folders, users, auditoria, importacao em massa).
   async function loadHealth() { return api("/api/analytics/screens/health"); }
+  async function loadScreenMap() { return api("/api/screens/map"); }
+  async function loadScreenGroups() { return api("/api/screen-groups"); }
+  async function loadDatasets() { return api("/api/datasets"); }
+  async function loadCampaigns() { return api("/api/campaigns"); }
+  async function createCampaign(data) { return api("/api/campaigns", { method: "POST", body: JSON.stringify(data) }); }
+  async function updateCampaign(id, data) { return api("/api/campaigns/" + id, { method: "PATCH", body: JSON.stringify(data) }); }
+  async function deleteCampaign(id) { return api("/api/campaigns/" + id, { method: "DELETE" }); }
+  async function createDataset(data) { return api("/api/datasets", { method: "POST", body: JSON.stringify(data) }); }
+  async function updateDataset(id, data) { return api("/api/datasets/" + id, { method: "PATCH", body: JSON.stringify(data) }); }
+  async function refreshDataset(id) { return api("/api/datasets/" + id + "/refresh", { method: "POST" }); }
+  async function importDatasetCsv(id, csvText) { return api("/api/datasets/" + id + "/import-csv", { method: "POST", body: JSON.stringify({ csv_text: csvText }) }); }
+  async function deleteDataset(id) { return api("/api/datasets/" + id, { method: "DELETE" }); }
+  async function createScreenGroup(data) { return api("/api/screen-groups", { method: "POST", body: JSON.stringify(data) }); }
+  async function sendScreenCommand(screenId, command_type, payload) { return api("/api/screens/" + screenId + "/commands", { method: "POST", body: JSON.stringify({ command_type, payload: payload || {} }) }); }
+  async function requestScreenshot(screenId) { return api("/api/screens/" + screenId + "/screenshot", { method: "POST" }); }
   async function loadProofOfPlay(days, screenSlug) {
     const qs = new URLSearchParams();
     if (days) qs.set("days", String(days));
     if (screenSlug) qs.set("screen", screenSlug);
     return api("/api/analytics/proof-of-play?" + qs.toString());
   }
+  async function loadProofSummary(days, screenSlug) {
+    const qs = new URLSearchParams();
+    if (days) qs.set("days", String(days));
+    if (screenSlug) qs.set("screen", screenSlug);
+    return api("/api/analytics/proof-of-play/summary?" + qs.toString());
+  }
+  async function loadReportSchedules() { return api("/api/analytics/reports"); }
+  async function createReportSchedule(data) { return api("/api/analytics/reports", { method: "POST", body: JSON.stringify(data) }); }
+  async function updateReportSchedule(id, data) { return api("/api/analytics/reports/" + id, { method: "PATCH", body: JSON.stringify(data) }); }
+  async function sendReportSchedule(id) { return api("/api/analytics/reports/" + id + "/send", { method: "POST" }); }
+  async function deleteReportSchedule(id) { return api("/api/analytics/reports/" + id, { method: "DELETE" }); }
   async function previewScreen(id) { return api("/api/screens/" + id + "/preview"); }
   async function bulkImportMedia(items) { return api("/api/media/bulk", { method: "POST", body: JSON.stringify({ items }) }); }
   async function loadFolders() { return api("/api/folders"); }
@@ -163,6 +197,28 @@
     const j = await api("/api/auth/change-password", { method: "POST", body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }) });
     if (j && j.token) { token = j.token; localStorage.setItem(TOKEN_KEY, token); }
     return j;
+  }
+  async function setup2fa() { return api("/api/auth/2fa/setup", { method: "POST" }); }
+  async function enable2fa(code) { return api("/api/auth/2fa/enable", { method: "POST", body: JSON.stringify({ code }) }); }
+  async function disable2fa(currentPassword) { return api("/api/auth/2fa/disable", { method: "POST", body: JSON.stringify({ current_password: currentPassword }) }); }
+  async function loadApiTokens() { return api("/api/auth/api-tokens"); }
+  async function createApiToken(data) { return api("/api/auth/api-tokens", { method: "POST", body: JSON.stringify(data) }); }
+  async function revokeApiToken(id) { return api("/api/auth/api-tokens/" + id, { method: "DELETE" }); }
+  async function runBackup() { return api("/api/system/backup", { method: "POST" }); }
+  async function loadBackups() { return api("/api/system/backups"); }
+  async function downloadBackup(file) {
+    const headers = {};
+    if (token) headers["Authorization"] = "Bearer " + token;
+    if (state.activeCompanyId != null) headers["X-Company-Id"] = String(state.activeCompanyId);
+    const resp = await fetch("/api/system/backups/" + encodeURIComponent(file), { headers });
+    if (!resp.ok) throw new Error("Falha ao baixar backup.");
+    const blob = await resp.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = file;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
   }
 
   // ----- Multi-empresa (multi-tenant): branding, empresas e templates ----- //
@@ -241,11 +297,77 @@
     } catch (err) { toast({ kind: "err", msg: err.message }); }
   }
 
+  async function openBIModal() {
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.timeline + '</span><span class="modal-title">BI / Proof-of-play P7</span></div>' +
+      '<div class="modal-body" id="bi-body"><p class="hint">Carregando...</p></div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button><button class="btn ghost" data-export>' + ICONS.upload + ' Exportar CSV</button><button class="btn primary" data-new-report>' + ICONS.plus + ' Agendar e-mail</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    const body = modal.querySelector("#bi-body");
+    let days = 7;
+    let screenSlug = "";
+    const exportCsv = async () => {
+      const qs = new URLSearchParams();
+      qs.set("days", String(days));
+      if (screenSlug) qs.set("screen", screenSlug);
+      const headers = {};
+      if (token) headers.Authorization = "Bearer " + token;
+      if (state.activeCompanyId != null) headers["X-Company-Id"] = String(state.activeCompanyId);
+      try {
+        const resp = await fetch("/api/analytics/proof-of-play/export.csv?" + qs.toString(), { headers });
+        if (!resp.ok) throw new Error("Falha ao exportar CSV.");
+        const blob = await resp.blob();
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "proof-of-play.csv";
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+      } catch (err) { toast({ kind: "err", msg: err.message }); }
+    };
+    const load = async () => {
+      body.innerHTML = '<p class="hint">Carregando...</p>';
+      try {
+        const summary = await loadProofSummary(days, screenSlug || null);
+        const rows = await loadProofOfPlay(days, screenSlug || null);
+        const reports = await loadReportSchedules();
+        const max = Math.max(1, ...rows.map((r) => r.plays || 0));
+        const bars = rows.slice(0, 12).map((r) => '<div class="problem info" style="display:block"><div class="row between"><strong>' + esc(r.media_name) + '</strong><span class="mono">' + r.plays + ' plays / ' + Math.round((r.total_seconds || 0) / 60) + ' min</span></div><div style="height:8px;background:rgba(255,255,255,.08);border-radius:99px;overflow:hidden;margin-top:8px"><div style="width:' + Math.max(4, Math.round((r.plays || 0) * 100 / max)) + '%;height:100%;background:var(--accent)"></div></div></div>').join("") || '<p class="empty">Sem eventos na janela.</p>';
+        const reportRows = reports.map((r) => '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.recipients) + '</td><td><span class="tag">' + esc(r.frequency) + '</span></td><td class="mono">' + r.hour + ':00</td><td><span class="tag">' + (r.enabled ? "ativo" : "pausado") + '</span></td><td class="right"><button class="btn ghost small" data-send-report="' + r.id + '">' + ICONS.upload + '</button><button class="btn ghost small" data-toggle-report="' + r.id + '">' + ICONS.power + '</button><button class="btn danger small" data-del-report="' + r.id + '">' + ICONS.trash + '</button></td></tr>').join("") || '<tr><td colspan="6" class="empty">Nenhum relatório agendado.</td></tr>';
+        body.innerHTML =
+          '<div class="row" style="gap:10px;align-items:end"><div class="field grow"><label>Janela</label><select id="bi-days"><option value="7">7 dias</option><option value="30">30 dias</option><option value="90">90 dias</option></select></div><div class="field grow"><label>Tela</label><select id="bi-screen"><option value="">Todas</option>' + state.screens.map((s) => '<option value="' + esc(s.slug) + '">' + esc(s.name) + '</option>').join("") + '</select></div></div>' +
+          '<div class="grid2" style="margin:10px 0"><div class="stat"><span>Plays</span><b>' + summary.total_plays + '</b></div><div class="stat"><span>Tempo total</span><b>' + Math.round((summary.total_seconds || 0) / 60) + ' min</b></div><div class="stat"><span>Midias</span><b>' + summary.unique_media + '</b></div><div class="stat"><span>Telas</span><b>' + summary.unique_screens + '</b></div></div>' +
+          '<h4 style="margin:12px 0 8px">Top midias</h4>' + bars +
+          '<h4 style="margin:16px 0 8px">Relatórios agendados</h4><table class="set-table"><thead><tr><th>Nome</th><th>Destinatários</th><th>Freq.</th><th>Hora</th><th>Status</th><th></th></tr></thead><tbody>' + reportRows + '</tbody></table>';
+        const dsel = body.querySelector("#bi-days"); dsel.value = String(days); dsel.addEventListener("change", () => { days = Number(dsel.value); load(); });
+        const ssel = body.querySelector("#bi-screen"); ssel.value = screenSlug; ssel.addEventListener("change", () => { screenSlug = ssel.value; load(); });
+        body.querySelectorAll("[data-send-report]").forEach((b) => b.addEventListener("click", async () => { try { const r = await sendReportSchedule(b.dataset.sendReport); toast({ kind: r.sent ? "ok" : "warn", msg: r.sent ? "Relatório enviado." : "SMTP não configurado; nada enviado." }); load(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+        body.querySelectorAll("[data-toggle-report]").forEach((b) => b.addEventListener("click", async () => { const r = reports.find((x) => String(x.id) === String(b.dataset.toggleReport)); if (!r) return; try { await updateReportSchedule(r.id, { enabled: !r.enabled }); load(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+        body.querySelectorAll("[data-del-report]").forEach((b) => b.addEventListener("click", async () => { if (!(await confirmDialog({ title: "Excluir relatório", message: "Remover este relatório agendado?", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await deleteReportSchedule(b.dataset.delReport); load(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+      } catch (err) { body.innerHTML = '<p class="empty">' + esc(err.message) + '</p>'; }
+    };
+    modal.querySelector("[data-export]").addEventListener("click", exportCsv);
+    modal.querySelector("[data-new-report]").addEventListener("click", async () => {
+      const name = await promptDialog({ title: "Agendar relatório", message: "Nome do relatório:", icon: "timeline", placeholder: "Relatório semanal", confirmText: "Continuar" });
+      if (!name) return;
+      const recipients = await promptDialog({ title: "Destinatários", message: "E-mails separados por vírgula:", icon: "user", placeholder: "ops@empresa.com", confirmText: "Criar" });
+      if (!recipients) return;
+      try { await createReportSchedule({ name, recipients, frequency: "weekly", hour: 8, days: 7, screen_slug: screenSlug || null, enabled: true }); toast({ kind: "ok", msg: "Relatório agendado." }); load(); } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
+    load();
+  }
+
   /** Carrega todos os dados e renderiza o painel. */
   async function loadAll() {
     try {
       await Promise.all([loadMedia(), loadPlaylists(), loadScreens()]);
       try { state.folders = await loadFolders(); } catch (e) { state.folders = []; }
+      try { state.playlistFolders = await loadPlaylistFolders(); } catch (e) { state.playlistFolders = []; }
+      try { state.screenGroups = await loadScreenGroups(); } catch (e) { state.screenGroups = []; }
+      try { state.datasets = await loadDatasets(); } catch (e) { state.datasets = []; }
+      try { state.campaigns = await loadCampaigns(); } catch (e) { state.campaigns = []; }
       await refreshBranding();
       if (state.user && state.user.is_super_admin) { try { state.companies = await loadCompanies(); } catch (e) { state.companies = []; } }
       fixSelection();
@@ -485,8 +607,10 @@
       sb.innerHTML = sideHead("Midias", [{ act: "add-media", icon: "plus", title: "Nova midia" }, { act: "bulk-import", icon: "link", title: "Importar URLs em massa" }, { act: "new-folder", icon: "folder", title: "Nova pasta" }, { act: "reload", icon: "refresh", title: "Recarregar" }]) +
         '<div class="tree">' + (list.length ? list.map((m) => '<div class="tree-item ' + (m.id === state.selectedMediaId ? "active" : "") + '" data-media="' + m.id + '">' + ICONS[TYPE_ICON[m.type]] + '<span class="name">' + esc(m.name) + '</span><span class="tag">' + TYPE_LABEL[m.type] + '</span></div>').join("") : '<div class="empty">' + (state.media.length ? "Nada encontrado para os filtros." : "Nenhuma midia. Use + para adicionar.") + '</div>') + '</div>';
     } else if (state.activeSection === "playlists") {
-      sb.innerHTML = sideHead("Playlists", [{ act: "add-playlist", icon: "plus", title: "Nova playlist" }, { act: "reload", icon: "refresh", title: "Recarregar" }]) +
-        '<div class="tree">' + (state.playlists.length ? state.playlists.map((p) => '<div class="tree-item ' + (p.id === state.openPlaylistId ? "active" : "") + '" data-playlist="' + p.id + '">' + ICONS.playlist + '<span class="name">' + esc(p.name) + '</span><span class="tag">' + p.items.length + '</span></div>').join("") : '<div class="empty">Nenhuma playlist.</div>') + '</div>';
+      const list = filteredPlaylists();
+      sb.innerHTML = sideHead("Playlists", [{ act: "add-playlist", icon: "plus", title: "Nova playlist" }, { act: "new-playlist-folder", icon: "folder", title: "Nova pasta de playlists" }, { act: "bulk-tag-playlists", icon: "tag", title: "Adicionar tags em massa" }, { act: "reload", icon: "refresh", title: "Recarregar" }]) +
+        '<div style="padding:8px 10px;border-bottom:1px solid var(--border)"><span class="side-search">' + ICONS.search + '<input id="pl-search" placeholder="Buscar playlists..." value="' + esc(state.playlistQuery) + '"/></span><select id="pl-folder" style="width:100%;margin-top:8px">' + playlistFolderOptions(state.playlistFolder) + '</select></div>' +
+        '<div class="tree">' + (list.length ? list.map((p) => '<div class="tree-item ' + (p.id === state.openPlaylistId ? "active" : "") + '" data-playlist="' + p.id + '">' + ICONS.playlist + '<span class="name">' + esc(p.name) + '</span><span class="tag">' + p.items.length + '</span></div>').join("") : '<div class="empty">' + (state.playlists.length ? "Nada encontrado para os filtros." : "Nenhuma playlist.") + '</div>') + '</div>';
     } else {
       const rows = [];
       state.screens.forEach((s) => s.zones.forEach((z) => z.schedules.forEach((sc) => {
@@ -504,6 +628,8 @@
     sb.querySelectorAll("[data-screen]").forEach((b) => b.addEventListener("click", () => { state.activeScreenId = Number(b.dataset.screen); const s = screen(); state.selectedZoneId = s && s.zones[0] ? s.zones[0].id : null; renderAll(); }));
     sb.querySelectorAll("[data-media]").forEach((b) => b.addEventListener("click", () => { state.selectedMediaId = Number(b.dataset.media); renderSidebar(); renderInspector(); }));
     sb.querySelectorAll("[data-playlist]").forEach((b) => b.addEventListener("click", () => { state.openPlaylistId = Number(b.dataset.playlist); renderSidebar(); renderTabs(); renderDoc(); renderInspector(); renderBottom(); }));
+    const ps = $("pl-search"); if (ps) ps.addEventListener("input", () => { state.playlistQuery = ps.value; renderSidebar(); });
+    const pf = $("pl-folder"); if (pf) pf.addEventListener("change", () => { state.playlistFolder = pf.value; renderSidebar(); });
     sb.querySelectorAll("[data-sched-screen]").forEach((b) => b.addEventListener("click", () => { state.activeSection = "screens"; state.activeScreenId = Number(b.dataset.schedScreen); renderAll(); }));
     sb.querySelectorAll("[data-side-act]").forEach((b) => b.addEventListener("click", () => handleSideAct(b.dataset.sideAct)));
   }
@@ -518,6 +644,8 @@
       } else if (act === "add-media") { openMediaModal(); }
       else if (act === "bulk-import") { openBulkModal(); }
       else if (act === "new-folder") { await createFolder(); }
+      else if (act === "new-playlist-folder") { await createPlaylistFolder(); }
+      else if (act === "bulk-tag-playlists") { await bulkTagPlaylists(); }
       else if (act === "preview") { const s = screen(); if (s) window.open(playerUrl(s.slug), "_blank"); else toast({ kind: "warn", msg: "Selecione uma tela primeiro." }); }
     } catch (err) { toast({ kind: "err", msg: err.message }); }
   }
@@ -662,7 +790,7 @@
   function renderInspector() {
     const insp = $("inspector");
     if (state.activeSection === "media") { insp.innerHTML = renderMediaInspector(); bindMediaInspector(); return; }
-    if (state.activeSection === "playlists") { insp.innerHTML = '<div class="insp-head">' + ICONS.playlist + '<span>Playlist</span></div><div class="insp-section"><p class="empty" style="padding:0">Selecione um item na linha do tempo do editor para ajustar duracao, ajuste, transicao e som.</p></div>'; return; }
+    if (state.activeSection === "playlists") { insp.innerHTML = renderPlaylistInspector(); bindPlaylistInspector(); return; }
     if (state.activeSection === "schedules") { insp.innerHTML = '<div class="insp-head">' + ICONS.clock + '<span>Agendamentos</span></div><div class="insp-section"><p class="empty" style="padding:0">Os agendamentos sao criados no inspetor de cada zona (secao Telas).</p></div>'; return; }
     const z = zone();
     const sc = screen();
@@ -683,12 +811,25 @@
   function screenProps(sc) {
     return '<div class="insp-section"><h5>Tela</h5>' + field("Nome", '<input id="f-sname" value="' + esc(sc.name) + '"/>') + field("Fuso horario", '<input id="f-tz" value="' + esc(sc.timezone) + '"/>') +
       '<div class="switch"><span>Status</span><span class="tag" style="color:' + (isOnline(sc) ? "var(--green)" : "var(--faint)") + '">' + (isOnline(sc) ? "online" : "offline") + '</span></div>' +
+      '<div class="switch"><span>Coletar proof-of-play</span><input id="f-collect-stats" type="checkbox" ' + (sc.collect_stats !== false ? "checked" : "") + '/></div>' +
       field("Slug (somente leitura)", '<input value="' + esc(sc.slug) + '" readonly/>') +
+      field("Tags da tela", '<input id="f-stags" value="' + esc((sc.tags || []).join(", ")) + '" placeholder="loja-1, vitrine, sp"/>') +
+      field("Local", '<input id="f-location" value="' + esc(sc.location_label || "") + '" placeholder="Shopping Centro - Piso 2"/>') +
+      '<div class="grid2">' + field("Latitude", '<input id="f-lat" value="' + esc(sc.latitude == null ? "" : sc.latitude) + '" placeholder="-23.55"/>') + field("Longitude", '<input id="f-lon" value="' + esc(sc.longitude == null ? "" : sc.longitude) + '" placeholder="-46.63"/>') + '</div>' +
       '<div class="field"><label>Link do player (TV)</label><div class="code">' + esc(playerUrl(sc.slug)) + '</div></div>' +
       '<button class="btn ghost block small" data-copy-link>' + ICONS.copy + ' Copiar link</button>' +
       '<button class="btn ghost block small" style="margin-top:8px" data-preview-screen>' + ICONS.eye + ' Pre-visualizar player</button>' +
       '<button class="btn ghost block small" style="margin-top:8px" data-live-preview>' + ICONS.eye + ' Pre-visualizar ao vivo (no painel)</button>' +
-      '<button class="btn ghost block small" style="margin-top:8px" data-kiosk>' + ICONS.screen + ' Modo quiosque (QR code)</button></div>' +
+      '<button class="btn ghost block small" style="margin-top:8px" data-kiosk>' + ICONS.screen + ' Modo quiosque (QR code)</button>' +
+      '<button class="btn ghost block small" style="margin-top:8px" data-export-layout>' + ICONS.upload + ' Exportar layout</button>' +
+      '<button class="btn ghost block small" style="margin-top:8px" data-import-layout>' + ICONS.folder + ' Importar layout</button></div>' +
+      '<div class="insp-section"><h5>Publicacao P6</h5><div class="switch"><span>Status</span><span class="tag">' + esc(sc.publish_status || "published") + '</span></div>' +
+      field("Publicar em (opcional)", '<input id="f-publish-at" type="datetime-local" value="' + (sc.publish_at ? String(sc.publish_at).slice(0, 16) : "") + '"/>') +
+      '<button class="btn primary block small" data-publish-now>' + ICONS.check + ' Publicar agora</button>' +
+      '<button class="btn ghost block small" style="margin-top:8px" data-schedule-publish>' + ICONS.clock + ' Agendar publicacao</button>' +
+      '<button class="btn ghost block small" style="margin-top:8px" data-draft-screen>' + ICONS.code + ' Voltar para rascunho</button>' +
+      '<button class="btn ' + (sc.layout_locked ? "danger" : "ghost") + ' block small" style="margin-top:8px" data-lock-layout>' + ICONS.lock + ' ' + (sc.layout_locked ? "Destravar layout" : "Travar layout") + '</button><span class="hint" style="display:block;margin-top:6px">Quando travado, zonas e importacao de layout ficam bloqueadas; playlists e conteudo continuam editaveis.</span></div>' +
+      '<div class="insp-section"><h5>Comandos P4</h5><button class="btn block small" data-cmd-shot>' + ICONS.eye + ' Screenshot</button><button class="btn ghost block small" style="margin-top:8px" data-cmd-identify>' + ICONS.info + ' Identificar tela</button><button class="btn ghost block small" style="margin-top:8px" data-cmd-reload>' + ICONS.refresh + ' Recarregar player</button><button class="btn ghost block small" style="margin-top:8px" data-cmd-list>' + ICONS.terminal + ' Ver fila de comandos</button><span class="hint" style="display:block;margin-top:6px">Power, volume, brilho, CEC/RS232 e shell exigem agente/hardware no player; a fila de comandos ja esta pronta para isso.</span></div>' +
       '<div class="insp-section"><h5>Sincronia e emparelhamento</h5>' + field("Grupo de sincronia", '<input id="f-syncgroup" value="' + esc(sc.sync_group || "") + '" placeholder="ex.: vitrine-loja1"/>') + '<span class="hint" style="display:block;margin:-4px 0 10px">Telas no mesmo grupo recarregam juntas quando uma e atualizada.</span>' + (sc.pair_code ? '<div class="field"><label>Codigo de emparelhamento (TV)</label><div class="code">' + esc(sc.pair_code) + '</div></div><button class="btn ghost block small" data-copy-pair>' + ICONS.copy + ' Copiar codigo</button>' : '') + '</div>' +
       '<div class="insp-section"><h5>Atalhos de layout</h5><button class="btn block" data-add-ticker>' + ICONS.tag + ' Adicionar rodape de ticker (1 clique)</button><span class="hint" style="display:block;margin-top:6px">Cria uma zona fixa de rodape (15% da altura) ja com um ticker de promocoes.</span></div>' +
       '<div class="insp-section"><h5>Musica de fundo (tela)</h5>' + screenMusicField(sc) + '</div>' +
@@ -731,6 +872,11 @@
       const sc = screen();
       const sn = $("f-sname"); if (sn) { sn.addEventListener("input", () => { sc.name = sn.value; renderTabs(); renderSidebar(); }); sn.addEventListener("change", () => patchScreen(sc.id, { name: sn.value })); }
       const tz = $("f-tz"); if (tz) tz.addEventListener("change", () => patchScreen(sc.id, { timezone: tz.value }));
+      const cs = $("f-collect-stats"); if (cs) cs.addEventListener("change", async () => { await patchScreen(sc.id, { collect_stats: cs.checked }); await loadScreens(); renderInspector(); toast({ kind: "ok", msg: cs.checked ? "Coleta ativada." : "Coleta desativada." }); });
+      const stags = $("f-stags"); if (stags) stags.addEventListener("change", async () => { await patchScreen(sc.id, { tags: stags.value.split(",").map((s) => s.trim()).filter(Boolean) }); await loadScreens(); renderSidebar(); renderInspector(); });
+      const loc = $("f-location"); if (loc) loc.addEventListener("change", () => patchScreen(sc.id, { location_label: loc.value.trim() || null }));
+      const lat = $("f-lat"); if (lat) lat.addEventListener("change", () => patchScreen(sc.id, { latitude: lat.value.trim() ? Number(lat.value) : null }));
+      const lon = $("f-lon"); if (lon) lon.addEventListener("change", () => patchScreen(sc.id, { longitude: lon.value.trim() ? Number(lon.value) : null }));
       const sg = $("f-syncgroup"); if (sg) sg.addEventListener("change", async () => { try { await api("/api/screens/" + sc.id, { method: "PATCH", body: JSON.stringify({ sync_group: sg.value.trim() || null }) }); await loadScreens(); renderInspector(); toast({ kind: "ok", msg: "Grupo de sincronia atualizado." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
       const cpr = insp.querySelector("[data-copy-pair]"); if (cpr) cpr.addEventListener("click", () => copyText(sc.pair_code || ""));
       const at = insp.querySelector("[data-add-ticker]"); if (at) at.addEventListener("click", () => addTickerFooter(sc));
@@ -738,6 +884,16 @@
       const pv = insp.querySelector("[data-preview-screen]"); if (pv) pv.addEventListener("click", () => window.open(playerUrl(sc.slug), "_blank"));
       const lp = insp.querySelector("[data-live-preview]"); if (lp) lp.addEventListener("click", () => openLivePreview(sc));
       const kq = insp.querySelector("[data-kiosk]"); if (kq) kq.addEventListener("click", () => openKioskMode(sc));
+      const el = insp.querySelector("[data-export-layout]"); if (el) el.addEventListener("click", () => exportLayout(sc));
+      const il = insp.querySelector("[data-import-layout]"); if (il) il.addEventListener("click", () => importLayout(sc));
+      const pn = insp.querySelector("[data-publish-now]"); if (pn) pn.addEventListener("click", async () => { try { await api("/api/screens/" + sc.id + "/publish", { method: "POST", body: JSON.stringify({ publish_at: null }) }); await loadScreens(); renderInspector(); toast({ kind: "ok", msg: "Tela publicada." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+      const sp = insp.querySelector("[data-schedule-publish]"); if (sp) sp.addEventListener("click", async () => { const v = $("f-publish-at") ? $("f-publish-at").value : ""; if (!v) { toast({ kind: "warn", msg: "Informe a data/hora de publicacao." }); return; } try { await api("/api/screens/" + sc.id + "/publish", { method: "POST", body: JSON.stringify({ publish_at: v }) }); await loadScreens(); renderInspector(); toast({ kind: "ok", msg: "Publicacao agendada." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+      const dr = insp.querySelector("[data-draft-screen]"); if (dr) dr.addEventListener("click", async () => { try { await api("/api/screens/" + sc.id, { method: "PATCH", body: JSON.stringify({ publish_status: "draft", publish_at: null }) }); await loadScreens(); renderInspector(); toast({ kind: "ok", msg: "Tela voltou para rascunho." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+      const lk = insp.querySelector("[data-lock-layout]"); if (lk) lk.addEventListener("click", async () => { try { await api("/api/screens/" + sc.id + "/layout-lock", { method: "POST", body: JSON.stringify({ locked: !sc.layout_locked }) }); await loadScreens(); renderInspector(); toast({ kind: "ok", msg: sc.layout_locked ? "Layout destravado." : "Layout travado." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+      const shot = insp.querySelector("[data-cmd-shot]"); if (shot) shot.addEventListener("click", () => screenCommand(sc, "screenshot"));
+      const ident = insp.querySelector("[data-cmd-identify]"); if (ident) ident.addEventListener("click", () => screenCommand(sc, "identify"));
+      const rel = insp.querySelector("[data-cmd-reload]"); if (rel) rel.addEventListener("click", () => screenCommand(sc, "reload"));
+      const cmdList = insp.querySelector("[data-cmd-list]"); if (cmdList) cmdList.addEventListener("click", () => openScreenCommands(sc));
       const dsc = insp.querySelector("[data-dup-screen]"); if (dsc) dsc.addEventListener("click", () => duplicateScreen(sc));
       const bg = $("f-bgaudio"); if (bg) bg.addEventListener("change", () => setScreenMusic(bg.value ? Number(bg.value) : null));
       const um = insp.querySelector("[data-upload-music]"); if (um) um.addEventListener("click", uploadScreenMusic);
@@ -786,10 +942,16 @@
 
   // ============================ Midias ============================== //
   function folderName(id) { const f = state.folders.find((x) => x.id === id); return f ? f.name : null; }
+  function playlistFolderName(id) { const f = state.playlistFolders.find((x) => x.id === id); return f ? f.name : null; }
   function mediaFolderOptions(sel) {
     return '<option value="all"' + (sel === "all" ? " selected" : "") + '>Todas as pastas</option>' +
       '<option value="none"' + (sel === "none" ? " selected" : "") + '>Sem pasta</option>' +
       state.folders.map((f) => '<option value="' + f.id + '"' + (String(sel) === String(f.id) ? " selected" : "") + '>' + esc(f.name) + '</option>').join("");
+  }
+  function playlistFolderOptions(sel) {
+    return '<option value="all"' + (sel === "all" ? " selected" : "") + '>Todas as pastas</option>' +
+      '<option value="none"' + (sel === "none" ? " selected" : "") + '>Sem pasta</option>' +
+      state.playlistFolders.map((f) => '<option value="' + f.id + '"' + (String(sel) === String(f.id) ? " selected" : "") + '>' + esc(f.name) + '</option>').join("");
   }
   function filteredMedia() {
     const q = (state.mediaQuery || "").trim().toLowerCase();
@@ -800,12 +962,25 @@
       return (m.name + " " + (m.tags || []).join(" ") + " " + (TYPE_LABEL[m.type] || "")).toLowerCase().indexOf(q) !== -1;
     });
   }
+  function filteredPlaylists() {
+    const q = (state.playlistQuery || "").trim().toLowerCase();
+    return state.playlists.filter((p) => {
+      if (state.playlistFolder === "none" && p.folder_id != null) return false;
+      if (state.playlistFolder !== "all" && state.playlistFolder !== "none" && String(p.folder_id) !== String(state.playlistFolder)) return false;
+      if (!q) return true;
+      return (p.name + " " + (p.tags || []).join(" ")).toLowerCase().indexOf(q) !== -1;
+    });
+  }
   function renderMediaDoc() {
     return '<div class="doc-toolbar">' +
       '<span class="side-search grow">' + ICONS.search + '<input id="media-search" placeholder="Buscar por nome ou tag..." value="' + esc(state.mediaQuery) + '"/></span>' +
       '<select id="media-folder">' + mediaFolderOptions(state.mediaFolder) + '</select>' +
       '<button class="btn ghost small" id="md-folder">' + ICONS.folder + ' Nova pasta</button>' +
+      '<button class="btn ghost small" id="md-tags">' + ICONS.tag + ' Tags em massa</button>' +
       '<button class="btn ghost small" id="md-bulk">' + ICONS.link + ' Importar URLs</button>' +
+      '<button class="btn ghost small" id="md-url">' + ICONS.upload + ' Baixar de URL</button>' +
+      '<button class="btn ghost small" id="md-datasets">' + ICONS.terminal + ' DataSets</button>' +
+      '<button class="btn ghost small" id="md-purge">' + ICONS.trash + ' Limpar nao usadas</button>' +
       '<button class="btn primary small" id="md-add">' + ICONS.plus + ' Nova midia</button>' +
       '</div><div id="media-grid-wrap">' + renderMediaGrid() + '</div>';
   }
@@ -851,7 +1026,11 @@
     const fol = $("media-folder"); if (fol) fol.addEventListener("change", () => { state.mediaFolder = fol.value; refreshGrid(); });
     const add = $("md-add"); if (add) add.addEventListener("click", openMediaModal);
     const bulk = $("md-bulk"); if (bulk) bulk.addEventListener("click", openBulkModal);
+    const urlb = $("md-url"); if (urlb) urlb.addEventListener("click", openUrlImportModal);
+    const ds = $("md-datasets"); if (ds) ds.addEventListener("click", openDatasetsModal);
+    const purge = $("md-purge"); if (purge) purge.addEventListener("click", purgeUnusedMedia);
     const nf = $("md-folder"); if (nf) nf.addEventListener("click", createFolder);
+    const bt = $("md-tags"); if (bt) bt.addEventListener("click", bulkTagMedia);
     bindMediaGrid();
   }
   function bindMediaGrid() {
@@ -1261,7 +1440,7 @@
     modal.className = "modal modal-wide";
     modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.wifi + '</span><span class="modal-title">Painel de saude das telas</span></div>' +
       '<div class="modal-body" id="hp-body"><p class="hint">Carregando...</p></div>' +
-      '<div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button><button class="btn ghost" data-refresh>' + ICONS.refresh + ' Atualizar</button></div>';
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button><button class="btn ghost" data-group>' + ICONS.folder + ' Novo grupo</button><button class="btn ghost" data-refresh>' + ICONS.refresh + ' Atualizar</button></div>';
     const ui = buildOverlay(modal);
     modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
     const body = modal.querySelector("#hp-body");
@@ -1269,20 +1448,51 @@
     const load = async () => {
       body.innerHTML = '<p class="hint">Carregando...</p>';
       try {
-        const rows = await loadHealth();
+        const rows = await loadScreenMap();
+        let groups = [];
+        try { groups = await loadScreenGroups(); } catch (e) { groups = []; }
         let pop = [];
         try { pop = await loadProofOfPlay(7); } catch (e) { pop = []; }
         const online = rows.filter((r) => r.online).length;
-        const hrows = rows.length ? rows.map((r) => '<tr><td>' + (r.online ? '<span class="tag" style="color:var(--green)">online</span>' : '<span class="tag" style="color:var(--faint)">offline</span>') + '</td><td>' + esc(r.name) + '</td><td class="mono">' + fmtAgo(r.seconds_since_seen) + '</td><td class="mono">' + r.connected_players + '</td></tr>').join("") : '<tr><td colspan="4" class="empty">Nenhuma tela cadastrada.</td></tr>';
+        const hrows = rows.length ? rows.map((r) => '<tr><td>' + (r.online ? '<span class="tag" style="color:var(--green)">online</span>' : '<span class="tag" style="color:var(--faint)">offline</span>') + '</td><td>' + esc(r.name) + '<div class="hint">' + esc((r.group_names || []).join(", ") || "-") + '</div></td><td>' + esc(r.location_label || "-") + (r.latitude != null && r.longitude != null ? '<div class="mono">' + r.latitude + ', ' + r.longitude + '</div>' : '') + '</td><td class="mono">' + fmtAgo(r.seconds_since_seen) + '</td><td class="mono">' + r.connected_players + '</td><td class="mono">' + (r.open_commands || 0) + '</td></tr>').join("") : '<tr><td colspan="6" class="empty">Nenhuma tela cadastrada.</td></tr>';
+        const grows = groups.length ? groups.map((g) => '<tr><td>' + esc(g.name) + '</td><td><span class="tag">' + esc(g.mode) + '</span></td><td>' + esc((g.tags || []).join(", ") || "-") + '</td><td class="mono">' + (g.screen_count || 0) + '</td><td>' + esc(g.sync_group || "-") + '</td></tr>').join("") : '<tr><td colspan="5" class="empty">Nenhum grupo cadastrado.</td></tr>';
         const prows = (pop && pop.length) ? pop.slice(0, 15).map((r) => '<tr><td>' + esc(r.media_name || "?") + '</td><td class="mono">' + r.plays + '</td><td class="mono">' + Math.round((r.total_seconds || 0) / 60) + ' min</td></tr>').join("") : '<tr><td colspan="3" class="empty">Sem dados de exibicao nos ultimos 7 dias.</td></tr>';
         body.innerHTML = '<p class="hint" style="margin-top:0">Telas online: <b>' + online + '/' + rows.length + '</b></p>' +
-          '<table class="set-table"><thead><tr><th>Status</th><th>Tela</th><th>Ultima reproducao</th><th>Players</th></tr></thead><tbody>' + hrows + '</tbody></table>' +
+          '<table class="set-table"><thead><tr><th>Status</th><th>Tela / grupos</th><th>Local</th><th>Ultima reproducao</th><th>Players</th><th>Cmds</th></tr></thead><tbody>' + hrows + '</tbody></table>' +
+          '<label class="mm-label">Grupos de telas</label>' +
+          '<table class="set-table"><thead><tr><th>Grupo</th><th>Modo</th><th>Tags</th><th>Telas</th><th>Sync</th></tr></thead><tbody>' + grows + '</tbody></table>' +
           '<label class="mm-label">Proof-of-play (ultimos 7 dias)</label>' +
           '<table class="set-table"><thead><tr><th>Midia</th><th>Exibicoes</th><th>Tempo</th></tr></thead><tbody>' + prows + '</tbody></table>';
       } catch (err) { body.innerHTML = '<p class="empty">' + esc(err.message) + '</p>'; }
     };
     modal.querySelector("[data-refresh]").addEventListener("click", load);
+    modal.querySelector("[data-group]").addEventListener("click", () => openScreenGroupModal(load));
     load();
+  }
+
+  function openScreenGroupModal(onDone) {
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    const screenOpts = state.screens.map((s) => '<label class="row" style="gap:8px;margin:4px 0"><input type="checkbox" data-gs="' + s.id + '"/> ' + esc(s.name) + '</label>').join("") || '<p class="empty">Nenhuma tela.</p>';
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.folder + '</span><span class="modal-title">Novo grupo de telas</span></div>' +
+      '<div class="modal-body"><div class="field"><label>Nome</label><input id="grp-name" placeholder="Ex.: Vitrines SP"/></div><div class="field"><label>Modo</label><select id="grp-mode"><option value="dynamic">Dinamico por tags</option><option value="static">Estatico por selecao</option></select></div><div class="field"><label>Tags (modo dinamico)</label><input id="grp-tags" placeholder="vitrine, sp"/></div><div class="field"><label>Grupo de sincronia opcional</label><input id="grp-sync" placeholder="vitrine-sp"/></div><label class="mm-label">Telas (modo estatico)</label><div style="max-height:180px;overflow:auto">' + screenOpts + '</div></div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Cancelar</button><button class="btn primary" data-ok>' + ICONS.check + ' Criar</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    modal.querySelector("[data-ok]").addEventListener("click", async () => {
+      const name = modal.querySelector("#grp-name").value.trim();
+      const mode = modal.querySelector("#grp-mode").value;
+      const tags = modal.querySelector("#grp-tags").value.split(",").map((s) => s.trim()).filter(Boolean);
+      const screen_ids = Array.from(modal.querySelectorAll("[data-gs]:checked")).map((i) => Number(i.dataset.gs));
+      if (!name) { toast({ kind: "warn", msg: "Informe o nome do grupo." }); return; }
+      try {
+        await createScreenGroup({ name, mode, tags, screen_ids, sync_group: modal.querySelector("#grp-sync").value.trim() || null });
+        state.screenGroups = await loadScreenGroups();
+        ui.close();
+        if (onDone) onDone();
+        toast({ kind: "ok", msg: "Grupo criado." });
+      } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
   }
 
   // ----------------------- Console Super Admin --------------------- //
@@ -1466,6 +1676,74 @@
     return '<div class="layout-mini">' + zones.map((z) => '<span style="left:' + z.x + '%;top:' + z.y + '%;width:' + z.width + '%;height:' + z.height + '%"></span>').join("") + '</div>';
   }
 
+  async function exportLayout(sc) {
+    try {
+      const data = await api("/api/screens/" + sc.id + "/layout/export");
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "layout-" + String(sc.name || sc.id).replace(/[^a-z0-9_-]+/gi, "_") + ".json";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+
+  function importLayout(sc) {
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = "application/json,.json";
+    inp.addEventListener("change", async () => {
+      const file = inp.files && inp.files[0];
+      if (!file) return;
+      if (!(await confirmDialog({ title: "Importar layout", message: "Substituir zonas e overlays desta tela pelo layout do arquivo?", icon: "folder", confirmText: "Importar" }))) return;
+      try {
+        const data = JSON.parse(await file.text());
+        await api("/api/screens/" + sc.id + "/layout/import", { method: "POST", body: JSON.stringify(data) });
+        await loadScreens();
+        const fresh = screen();
+        state.selectedZoneId = fresh && fresh.zones[0] ? fresh.zones[0].id : null;
+        renderAll();
+        toast({ kind: "ok", msg: "Layout importado." });
+      } catch (err) { toast({ kind: "err", msg: "Falha ao importar layout: " + err.message }); }
+    });
+    inp.click();
+  }
+
+  async function screenCommand(sc, type) {
+    if (!sc) return;
+    try {
+      const cmd = type === "screenshot" ? await requestScreenshot(sc.id) : await sendScreenCommand(sc.id, type, {});
+      toast({ kind: "ok", msg: "Comando " + type + " enviado (fila #" + cmd.id + ")." });
+      if (type === "screenshot") {
+        setTimeout(async () => {
+          try { await openScreenCommands(sc); } catch (e) {}
+        }, 1800);
+      }
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+
+  async function openScreenCommands(sc) {
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.terminal + '</span><span class="modal-title">Comandos - ' + esc(sc.name) + '</span></div>' +
+      '<div class="modal-body" id="cmd-body"><p class="hint">Carregando...</p></div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button><button class="btn ghost" data-refresh>' + ICONS.refresh + ' Atualizar</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    const body = modal.querySelector("#cmd-body");
+    const load = async () => {
+      body.innerHTML = '<p class="hint">Carregando...</p>';
+      try {
+        const rows = await api("/api/screens/" + sc.id + "/commands");
+        const html = rows.length ? rows.map((c) => '<tr><td class="mono">#' + c.id + '</td><td>' + esc(c.command_type) + '</td><td><span class="tag">' + esc(c.status) + '</span></td><td>' + esc(c.result || "-") + (c.result_path ? '<div><a href="/media/' + esc(c.result_path) + '" target="_blank" rel="noopener">Abrir resultado</a></div>' : '') + '</td></tr>').join("") : '<tr><td colspan="4" class="empty">Nenhum comando recente.</td></tr>';
+        body.innerHTML = '<table class="set-table"><thead><tr><th>ID</th><th>Comando</th><th>Status</th><th>Resultado</th></tr></thead><tbody>' + html + '</tbody></table>';
+      } catch (err) { body.innerHTML = '<p class="empty">' + esc(err.message) + '</p>'; }
+    };
+    modal.querySelector("[data-refresh]").addEventListener("click", load);
+    load();
+  }
+
   /** Assistente de nova tela: nome, fuso e layout inicial (1, 2 ou 3 zonas). */
   async function duplicateScreen(sc) {
     const input = await promptDialog({ title: "Duplicar tela", message: "Nome da nova tela:", icon: "copy", placeholder: sc.name + " (copia)", confirmText: "Duplicar" });
@@ -1638,11 +1916,17 @@
     if (t === "countdown") return '<div class="field"><label>3. Titulo (opcional)</label><input id="wf-title" placeholder="Ex.: Faltam"/></div><div class="field"><label>Data/hora alvo</label><input id="wf-target" type="datetime-local"/></div><div class="field"><label>Mensagem ao zerar</label><input id="wf-done" placeholder="Chegou o grande dia!"/></div><span class="hint">Contagem regressiva ate a data/hora (fuso da TV).</span>';
     if (t === "qrcode") return '<div class="field"><label>3. Conteudo do QR (URL ou texto)</label><input id="wf-data" placeholder="https://seusite.com"/></div><div class="row" style="gap:10px"><div class="field grow"><label>Titulo (opcional)</label><input id="wf-title" placeholder="Aponte a camera"/></div><div class="field grow"><label>Tamanho (px)</label><input id="wf-size" type="number" value="320"/></div></div><span class="hint">O QR e gerado automaticamente (requer internet na TV).</span>';
     if (t === "rates") return '<div class="field"><label>3. Pares de moedas (um por linha: USD-BRL)</label><textarea id="wf-pairs" rows="4" placeholder="USD-BRL&#10;EUR-BRL&#10;GBP-BRL"></textarea></div><div class="field"><label>Titulo (opcional)</label><input id="wf-title" placeholder="Cotacoes"/></div><span class="hint">Cotacoes via servidor (sem chave). Atualiza a cada 10 min.</span>';
+    if (t === "worldclock") return '<div class="field"><label>3. Titulo</label><input id="wf-title" placeholder="Horario global"/></div><div class="field"><label>Fusos (um por linha: Nome | timezone)</label><textarea id="wf-zones" rows="4" placeholder="Sao Paulo | America/Sao_Paulo&#10;Lisboa | Europe/Lisbon&#10;Tokyo | Asia/Tokyo"></textarea></div><span class="hint">Use nomes IANA de timezone.</span>';
+    if (t === "calendar") return '<div class="field"><label>3. Titulo</label><input id="wf-title" placeholder="Agenda"/></div><div class="field"><label>Eventos (um por linha: AAAA-MM-DD | HH:MM | Titulo)</label><textarea id="wf-events" rows="5" placeholder="2026-06-20 | 09:00 | Abertura da loja"></textarea></div>';
+    if (t === "stocks") return '<div class="field"><label>3. Simbolos Stooq (um por linha)</label><textarea id="wf-symbols" rows="4" placeholder="AAPL.US&#10;MSFT.US&#10;PETR4.BR"></textarea></div><div class="field"><label>Titulo</label><input id="wf-title" placeholder="Mercado"/></div><span class="hint">Proxy publico via Stooq, sem chave.</span>';
+    if (t === "menuboard") return '<div class="field"><label>3. Titulo</label><input id="wf-title" placeholder="Cardapio"/></div><div class="field"><label>Categorias JSON</label><textarea id="wf-menu" rows="8">[{&quot;name&quot;:&quot;Pratos&quot;,&quot;items&quot;:[{&quot;name&quot;:&quot;Executivo&quot;,&quot;price&quot;:&quot;R$ 29&quot;,&quot;note&quot;:&quot;arroz, feijao e salada&quot;}]}]</textarea></div>';
+    if (t === "dataset") { const opts = state.datasets.map((d) => '<option value="' + d.id + '">' + esc(d.name) + '</option>').join(""); return '<div class="field"><label>3. DataSet</label><select id="wf-dataset"><option value="">Usar linhas JSON abaixo</option>' + opts + '</select></div><div class="row" style="gap:10px"><div class="field grow"><label>Titulo</label><input id="wf-title" placeholder="Tabela"/></div><div class="field grow"><label>Limite de linhas</label><input id="wf-limit" type="number" value="12"/></div></div><div class="field"><label>Linhas fallback JSON</label><textarea id="wf-rows" rows="6">[{&quot;item&quot;:&quot;Exemplo&quot;,&quot;valor&quot;:&quot;123&quot;}]</textarea></div>'; }
     return '<div class="field"><label>3. Produtos (um por linha: Nome | preco | obs)</label><textarea id="wf-products" rows="5" placeholder="Pizza grande | R$ 49,90 | ate sexta"></textarea></div><div class="row" style="gap:10px"><div class="field grow"><label>Titulo</label><input id="wf-title" placeholder="Promocoes"/></div><div class="field grow"><label>Velocidade (s)</label><input id="wf-speed" type="number" value="50"/></div></div><span class="hint">Faixa deslizante (vermelha), ideal no rodape da zona.</span>';
   }
   function collectWidgetConfig(t, modal) {
     const val = (id) => { const e = modal.querySelector(id); return e ? e.value : ""; };
     const lines = (id) => (val(id) || "").split("\n").map((s) => s.trim()).filter(Boolean);
+    const jsonList = (id, fallback) => { try { const v = val(id).trim(); return v ? JSON.parse(v) : (fallback || []); } catch (e) { return fallback || []; } };
     const title = (val("#wf-title") || "").trim();
     if (t === "clock") return { title: title, format: val("#wf-format") || "24h", showDate: val("#wf-showdate") !== "0" };
     if (t === "weather") { const cfg = { title: title, city: (val("#wf-city") || "").trim() || "Sao Paulo" }; const la = parseFloat(val("#wf-lat")); const lo = parseFloat(val("#wf-lon")); if (!isNaN(la) && !isNaN(lo)) { cfg.lat = la; cfg.lon = lo; } return cfg; }
@@ -1650,8 +1934,123 @@
     if (t === "countdown") return { title: title, target: val("#wf-target") || "", doneText: (val("#wf-done") || "").trim() };
     if (t === "qrcode") return { title: title, data: (val("#wf-data") || "").trim(), size: Number(val("#wf-size")) || 320 };
     if (t === "rates") return { title: title || "Cotacoes", pairs: lines("#wf-pairs").map((s) => s.toUpperCase()) };
+    if (t === "worldclock") return { title: title || "Horario global", zones: lines("#wf-zones").map((line) => { const p = line.split("|").map((s) => s.trim()); return { label: p[0] || p[1] || "UTC", timezone: p[1] || p[0] || "UTC" }; }) };
+    if (t === "calendar") return { title: title || "Agenda", events: lines("#wf-events").map((line) => { const p = line.split("|").map((s) => s.trim()); return { date: p[0] || "", time: p[1] || "", title: p[2] || p[1] || "" }; }) };
+    if (t === "stocks") return { title: title || "Mercado", symbols: lines("#wf-symbols").map((s) => s.toUpperCase()) };
+    if (t === "menuboard") return { title: title || "Cardapio", categories: jsonList("#wf-menu", []) };
+    if (t === "dataset") { const id = Number(val("#wf-dataset")); const cfg = { title: title || "Dados", limit: Number(val("#wf-limit")) || 12, rows: jsonList("#wf-rows", []) }; if (id) cfg.dataset_id = id; return cfg; }
     const products = lines("#wf-products").map((line) => { const p = line.split("|").map((s) => s.trim()); return { name: p[0] || "", price: p[1] || "", note: p[2] || "" }; });
     return { title: title || "Promocoes", products: products, speed: Number(val("#wf-speed")) || 50 };
+  }
+
+  function datasetRowsPreview(rows) {
+    rows = Array.isArray(rows) ? rows : [];
+    return rows.length ? esc(Object.keys(rows[0] || {}).join(", ")) + " - " + rows.length + " linha(s)" : "sem linhas";
+  }
+
+  function parseRowsJson(text) {
+    const raw = (text || "").trim();
+    if (!raw) return [];
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data)) throw new Error("As linhas devem ser uma lista JSON.");
+    return data.filter((row) => row && typeof row === "object" && !Array.isArray(row));
+  }
+
+  function openDatasetsModal() {
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    const rows = () => (state.datasets || []).map((d) =>
+      '<tr><td>' + esc(d.name) + '</td><td><span class="tag">' + esc(d.kind) + '</span></td><td>' +
+      datasetRowsPreview(d.rows) + '</td><td><span class="tag">' + esc(d.refresh_status || "idle") + '</span></td><td class="right">' +
+      (d.kind === "json_remote" ? '<button class="btn ghost small" data-ds-refresh="' + d.id + '">' + ICONS.refresh + '</button>' : '') +
+      '<button class="btn danger small" data-ds-del="' + d.id + '">' + ICONS.trash + '</button></td></tr>'
+    ).join("") || '<tr><td colspan="5" class="empty">Nenhum DataSet cadastrado.</td></tr>';
+    const renderBody = () => {
+      modal.querySelector("#ds-list").innerHTML = rows();
+      bindRows();
+    };
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.terminal + '</span><span class="modal-title">DataSets</span></div>' +
+      '<div class="modal-body">' +
+        '<table class="set-table"><thead><tr><th>Nome</th><th>Tipo</th><th>Dados</th><th>Status</th><th></th></tr></thead><tbody id="ds-list">' + rows() + '</tbody></table>' +
+        '<div class="field"><label>Novo DataSet</label><input id="ds-name" placeholder="Ex.: Precos da semana"/></div>' +
+        '<div class="row" style="gap:10px"><div class="field grow"><label>Tipo</label><select id="ds-kind"><option value="table">Tabela JSON</option><option value="csv">CSV colado</option><option value="json_remote">JSON remoto</option></select></div><div class="field grow"><label>URL remota</label><input id="ds-url" placeholder="https://.../dados.json"/></div></div>' +
+        '<div class="field"><label>Linhas JSON ou CSV</label><textarea id="ds-data" rows="7" placeholder="JSON: [{&quot;produto&quot;:&quot;Cafe&quot;,&quot;preco&quot;:&quot;R$ 8&quot;}]&#10;CSV: produto,preco"></textarea></div>' +
+      '</div><div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button><button class="btn primary" data-create-ds>' + ICONS.plus + ' Criar DataSet</button></div>';
+    const ui = buildOverlay(modal);
+    const bindRows = () => {
+      modal.querySelectorAll("[data-ds-refresh]").forEach((b) => b.addEventListener("click", async () => {
+        try { await refreshDataset(b.dataset.dsRefresh); state.datasets = await loadDatasets(); renderBody(); toast({ kind: "ok", msg: "DataSet atualizado." }); }
+        catch (err) { toast({ kind: "err", msg: err.message }); }
+      }));
+      modal.querySelectorAll("[data-ds-del]").forEach((b) => b.addEventListener("click", async () => {
+        if (!(await confirmDialog({ title: "Excluir DataSet", message: "Remover este DataSet?", icon: "trash", confirmText: "Excluir", danger: true }))) return;
+        try { await deleteDataset(b.dataset.dsDel); state.datasets = await loadDatasets(); renderBody(); toast({ kind: "warn", msg: "DataSet removido." }); }
+        catch (err) { toast({ kind: "err", msg: err.message }); }
+      }));
+    };
+    bindRows();
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    modal.querySelector("[data-create-ds]").addEventListener("click", async () => {
+      const name = modal.querySelector("#ds-name").value.trim();
+      const kind = modal.querySelector("#ds-kind").value;
+      const sourceUrl = modal.querySelector("#ds-url").value.trim();
+      const raw = modal.querySelector("#ds-data").value;
+      if (!name) { toast({ kind: "warn", msg: "Informe o nome do DataSet." }); return; }
+      try {
+        let created;
+        if (kind === "csv") {
+          created = await createDataset({ name: name, kind: "csv", rows: [] });
+          if (raw.trim()) await importDatasetCsv(created.id, raw);
+        } else if (kind === "json_remote") {
+          created = await createDataset({ name: name, kind: "json_remote", source_url: sourceUrl, rows: [] });
+          if (sourceUrl) { try { await refreshDataset(created.id); } catch (e) { /* mantem criado para ajuste posterior */ } }
+        } else {
+          const rowsJson = parseRowsJson(raw);
+          created = await createDataset({ name: name, kind: "table", rows: rowsJson });
+        }
+        state.datasets = await loadDatasets();
+        renderBody();
+        toast({ kind: "ok", msg: "DataSet criado." });
+      } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
+  }
+
+  // P3: baixar um arquivo (imagem/video/audio) a partir de uma URL.
+  function openUrlImportModal() {
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.setAttribute("role", "dialog"); modal.setAttribute("aria-modal", "true");
+    const folderOpts = '<option value="">Sem pasta</option>' + state.folders.map((f) => '<option value="' + f.id + '">' + esc(f.name) + '</option>').join("");
+    modal.innerHTML =
+      '<div class="modal-head"><span class="modal-ico">' + ICONS.upload + '</span><span class="modal-title">Baixar arquivo de URL</span></div>' +
+      '<div class="modal-body">' +
+        '<div class="field"><label>URL do arquivo (imagem, video ou audio)</label><input id="uu-url" placeholder="https://exemplo.com/video.mp4"/></div>' +
+        '<div class="field"><label>Nome</label><input id="uu-name" placeholder="Ex.: Video institucional"/></div>' +
+        '<div class="row" style="gap:10px"><div class="field grow"><label>Pasta (opcional)</label><select id="uu-folder">' + folderOpts + '</select></div><div class="field grow"><label>Tags</label><input id="uu-tags" placeholder="promo, verao"/></div></div>' +
+        '<span class="hint">O arquivo e baixado pelo servidor e otimizado automaticamente.</span>' +
+      '</div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Cancelar</button><button class="btn primary" data-create>' + ICONS.check + ' Baixar</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    modal.querySelector("[data-create]").addEventListener("click", async () => {
+      const url = modal.querySelector("#uu-url").value.trim();
+      const name = modal.querySelector("#uu-name").value.trim();
+      if (!url) { toast({ kind: "warn", msg: "Informe a URL." }); return; }
+      if (!name) { toast({ kind: "warn", msg: "Informe um nome." }); return; }
+      const body = { name: name, url: url, tags: modal.querySelector("#uu-tags").value.split(",").map((s) => s.trim()).filter(Boolean) };
+      const folderId = modal.querySelector("#uu-folder").value; if (folderId) body.folder_id = Number(folderId);
+      const btn = modal.querySelector("[data-create]"); btn.disabled = true;
+      try { await api("/api/media/import-url", { method: "POST", body: JSON.stringify(body) }); ui.close(); await loadMedia(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: "Midia baixada e adicionada." }); }
+      catch (err) { btn.disabled = false; toast({ kind: "err", msg: err.message }); }
+    });
+    setTimeout(() => { const n = modal.querySelector("#uu-url"); if (n) n.focus(); }, 40);
+  }
+
+  // P3: remover midias que nao estao em nenhuma playlist nem como audio de fundo.
+  async function purgeUnusedMedia() {
+    if (!(await confirmDialog({ title: "Limpar midias nao usadas", message: "Remove todas as midias que nao estao em nenhuma playlist nem como musica de fundo. Esta acao nao pode ser desfeita.", icon: "trash", confirmText: "Limpar", danger: true }))) return;
+    try { const r = await api("/api/media/purge-unused", { method: "POST" }); await loadMedia(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: ((r && r.deleted) || 0) + " midia(s) removida(s)." }); }
+    catch (err) { toast({ kind: "err", msg: err.message }); }
   }
 
   function openMediaModal(opts) {
@@ -1669,6 +2068,8 @@
         '<div class="field"><label>2. Nome</label><input id="mm-name" placeholder="Ex.: Promo de inverno"/></div>' +
         '<div id="mm-dynamic"></div>' +
         '<div class="row" style="gap:10px"><div class="field grow"><label>Pasta (opcional)</label><select id="mm-folder">' + folderOpts + '</select></div><div class="field grow"><label>Tags (separadas por virgula)</label><input id="mm-tags" placeholder="promo, inverno"/></div></div>' +
+        '<div class="switch"><span>Coletar proof-of-play</span><input id="mm-collect" type="checkbox" checked/></div>' +
+        '<div class="field"><label>Expira em (opcional)</label><input id="mm-expires" type="datetime-local"/><span class="hint">Apos esta data/hora a midia para de ser exibida.</span></div>' +
       '</div>' +
       '<div class="modal-actions"><button class="btn ghost" data-cancel>Cancelar</button><button class="btn primary" data-create>' + ICONS.check + ' Adicionar</button></div>';
     const ui = buildOverlay(modal);
@@ -1712,6 +2113,7 @@
       if (!name) { toast({ kind: "warn", msg: "Informe um nome." }); return; }
       const folderId = modal.querySelector("#mm-folder").value;
       const tags = modal.querySelector("#mm-tags").value;
+      const expires = modal.querySelector("#mm-expires") ? modal.querySelector("#mm-expires").value : "";
       try {
         let created;
         if (current === "image" || current === "video" || current === "audio") {
@@ -1724,14 +2126,21 @@
           created = await api("/api/media/upload", { method: "POST", body: fd });
         } else if (WIDGET_TYPES.indexOf(current) !== -1) {
           const body = { name, type: current, content: JSON.stringify(collectWidgetConfig(current, modal)), tags: tags.split(",").map((s) => s.trim()).filter(Boolean) };
+          body.collect_stats = modal.querySelector("#mm-collect").checked;
           if (folderId) body.folder_id = Number(folderId);
+          if (expires) body.expires_at = expires;
           created = await api("/api/media", { method: "POST", body: JSON.stringify(body) });
         } else {
           const value = modal.querySelector("#mm-value").value;
           const body = { name, type: current, tags: tags.split(",").map((s) => s.trim()).filter(Boolean) };
+          body.collect_stats = modal.querySelector("#mm-collect").checked;
           if (folderId) body.folder_id = Number(folderId);
-          if (current === "url" || current === "youtube" || current === "embed" || current === "live") body.source_url = value; else body.content = value;
+          if (current === "url" || current === "youtube" || current === "embed" || current === "live" || current === "pdf" || current === "webpage") body.source_url = value; else body.content = value;
+          if (expires) body.expires_at = expires;
           created = await api("/api/media", { method: "POST", body: JSON.stringify(body) });
+        }
+        if (expires && created && created.id && (current === "image" || current === "video" || current === "audio")) {
+          try { created = await api("/api/media/" + created.id, { method: "PATCH", body: JSON.stringify({ expires_at: expires }) }); } catch (e) {}
         }
         ui.close(); await loadMedia(); renderSidebar(); renderDoc();
         if (opts.onCreated) { await opts.onCreated(created); } else { toast({ kind: "ok", msg: "Midia adicionada." }); }
@@ -1781,16 +2190,72 @@
     try { await api("/api/folders", { method: "POST", body: JSON.stringify({ name }) }); state.folders = await loadFolders(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: "Pasta criada." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
   }
 
+  async function createPlaylistFolder() {
+    const name = await promptDialog({ title: "Nova pasta", message: "Nome da pasta de playlists:", icon: "folder", placeholder: "Ex.: Campanhas", confirmText: "Criar" });
+    if (!name) return;
+    try { await api("/api/playlists/folders", { method: "POST", body: JSON.stringify({ name }) }); state.playlistFolders = await loadPlaylistFolders(); renderSidebar(); renderInspector(); toast({ kind: "ok", msg: "Pasta de playlists criada." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+
+  async function bulkTagMedia() {
+    const items = filteredMedia();
+    if (!items.length) { toast({ kind: "warn", msg: "Nenhuma midia no filtro atual." }); return; }
+    const tags = await promptDialog({ title: "Tags em massa", message: "Adicionar tags as midias filtradas (" + items.length + "):", icon: "tag", placeholder: "promo, verao", confirmText: "Adicionar" });
+    if (!tags) return;
+    const list = tags.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!list.length) return;
+    try { const r = await api("/api/media/bulk-tags", { method: "POST", body: JSON.stringify({ ids: items.map((m) => m.id), tags: list }) }); await loadMedia(); renderSidebar(); renderDoc(); renderInspector(); toast({ kind: "ok", msg: (r.updated || 0) + " midia(s) atualizada(s)." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+
+  async function bulkTagPlaylists() {
+    const items = filteredPlaylists();
+    if (!items.length) { toast({ kind: "warn", msg: "Nenhuma playlist no filtro atual." }); return; }
+    const tags = await promptDialog({ title: "Tags em massa", message: "Adicionar tags as playlists filtradas (" + items.length + "):", icon: "tag", placeholder: "campanha, loja-1", confirmText: "Adicionar" });
+    if (!tags) return;
+    const list = tags.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!list.length) return;
+    try { const r = await api("/api/playlists/bulk-tags", { method: "POST", body: JSON.stringify({ ids: items.map((p) => p.id), tags: list }) }); await loadPlaylists(); renderSidebar(); renderDoc(); renderInspector(); toast({ kind: "ok", msg: (r.updated || 0) + " playlist(s) atualizada(s)." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+
+  function renderPlaylistInspector() {
+    const pl = playlistById(state.openPlaylistId);
+    if (!pl) return '<div class="insp-head">' + ICONS.playlist + '<span>Playlists</span></div><div class="insp-section"><p class="empty" style="padding:0">Selecione uma playlist para editar nome, pasta e tags.</p></div>';
+    const folderOpts = '<option value="">Sem pasta</option>' + state.playlistFolders.map((f) => '<option value="' + f.id + '"' + (pl.folder_id === f.id ? " selected" : "") + '>' + esc(f.name) + '</option>').join("");
+    const folderChip = pl.folder_id != null ? '<span class="chip">' + ICONS.folder + esc(playlistFolderName(pl.folder_id) || "?") + '</span>' : "";
+    const tags = (pl.tags || []).map((t) => '<span class="chip">' + esc(t) + '</span>').join("");
+    return '<div class="insp-head">' + ICONS.playlist + '<span>' + esc(pl.name) + '</span></div><div class="insp-section"><h5>Organizacao</h5>' +
+      ((folderChip || tags) ? '<div class="mc-meta" style="margin-bottom:10px">' + folderChip + tags + '</div>' : '') +
+      field("Nome", '<input id="pli-name" value="' + esc(pl.name) + '"/>') +
+      field("Pasta", '<select id="pli-folder">' + folderOpts + '</select>') +
+      field("Tags (separadas por virgula)", '<input id="pli-tags" value="' + esc((pl.tags || []).join(", ")) + '"/>') +
+      '<button class="btn primary block small" data-save-playlist>' + ICONS.check + ' Salvar playlist</button>' +
+      '<button class="btn ghost block small" style="margin-top:8px" data-new-pl-folder>' + ICONS.folder + ' Nova pasta</button></div>';
+  }
+
+  function bindPlaylistInspector() {
+    const insp = $("inspector"); const pl = playlistById(state.openPlaylistId); if (!pl) return;
+    const nf = insp.querySelector("[data-new-pl-folder]"); if (nf) nf.addEventListener("click", createPlaylistFolder);
+    const save = insp.querySelector("[data-save-playlist]"); if (!save) return;
+    save.addEventListener("click", async () => {
+      const patch = {
+        name: $("pli-name").value,
+        folder_id: $("pli-folder").value ? Number($("pli-folder").value) : null,
+        tags: $("pli-tags").value.split(",").map((s) => s.trim()).filter(Boolean),
+      };
+      try { await api("/api/playlists/" + pl.id, { method: "PATCH", body: JSON.stringify(patch) }); await loadPlaylists(); renderSidebar(); renderDoc(); renderInspector(); toast({ kind: "ok", msg: "Playlist atualizada." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
+  }
+
   function renderMediaInspector() {
     const m = mediaById(state.selectedMediaId);
     if (!m) return '<div class="insp-head">' + ICONS.media + '<span>Midias</span></div><div class="insp-section"><p class="empty" style="padding:0">Selecione uma midia para editar nome, conteudo, pasta e tags.</p></div>';
     let valField = "";
-    if (m.type === "text" || m.type === "html") valField = field("Conteudo", '<textarea id="mi-content" rows="4">' + esc(m.content || "") + '</textarea>');
-    else if (m.type === "url" || m.type === "youtube" || m.type === "embed") valField = field("URL de origem", '<input id="mi-url" value="' + esc(m.source_url || "") + '"/>');
+    if (m.type === "text" || m.type === "html" || WIDGET_TYPES.indexOf(m.type) !== -1) valField = field(WIDGET_TYPES.indexOf(m.type) !== -1 ? "Config JSON" : "Conteudo", '<textarea id="mi-content" rows="4">' + esc(m.content || "") + '</textarea>');
+    else if (m.type === "url" || m.type === "youtube" || m.type === "embed" || m.type === "live" || m.type === "pdf" || m.type === "webpage") valField = field("URL de origem", '<input id="mi-url" value="' + esc(m.source_url || "") + '"/>');
     else { const isAV = (m.type === "image" || m.type === "video"); valField = field("Arquivo atual", '<div class="code">' + esc(m.path || "-") + '</div>') + (isAV ? '<div class="field"><label>Substituir arquivo</label><input type="file" id="mi-file" accept="' + (m.type === "image" ? "image/*" : "video/*") + '"/></div>' : ''); }
     const folderOpts = '<option value="">Sem pasta</option>' + state.folders.map((f) => '<option value="' + f.id + '"' + (m.folder_id === f.id ? " selected" : "") + '>' + esc(f.name) + '</option>').join("");
     return '<div class="insp-head">' + ICONS[TYPE_ICON[m.type]] + '<span>' + esc(m.name) + '</span></div><div class="insp-section"><h5>' + TYPE_LABEL[m.type] + '</h5>' +
       field("Nome", '<input id="mi-name" value="' + esc(m.name) + '"/>') + valField +
+      '<div class="switch"><span>Coletar proof-of-play</span><input id="mi-collect" type="checkbox" ' + (m.collect_stats !== false ? "checked" : "") + '/></div>' +
       field("Pasta", '<select id="mi-folder">' + folderOpts + '</select>') +
       field("Tags (separadas por virgula)", '<input id="mi-tags" value="' + esc((m.tags || []).join(", ")) + '"/>') +
       '<button class="btn primary block small" data-save-media>' + ICONS.check + ' Salvar</button></div>';
@@ -1805,6 +2270,7 @@
         const patch = { name: $("mi-name").value };
         if ($("mi-content")) patch.content = $("mi-content").value;
         if ($("mi-url")) patch.source_url = $("mi-url").value;
+        if ($("mi-collect")) patch.collect_stats = $("mi-collect").checked;
         if ($("mi-folder")) patch.folder_id = $("mi-folder").value ? Number($("mi-folder").value) : null;
         if ($("mi-tags")) patch.tags = $("mi-tags").value.split(",").map((s) => s.trim()).filter(Boolean);
         await api("/api/media/" + m.id, { method: "PATCH", body: JSON.stringify(patch) });
@@ -1813,19 +2279,92 @@
     });
   }
 
+  function campaignTargetLabel(c) {
+    const parts = [];
+    if (c.screen_ids && c.screen_ids.length) parts.push("telas: " + c.screen_ids.length);
+    if (c.screen_group_ids && c.screen_group_ids.length) parts.push("grupos: " + c.screen_group_ids.length);
+    if (c.zone_ids && c.zone_ids.length) parts.push("zonas: " + c.zone_ids.length);
+    return parts.join(", ") || "todas as telas do escopo";
+  }
+
+  function openCampaignsModal() {
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    const zoneOptions = [];
+    state.screens.forEach((s) => (s.zones || []).forEach((z) => zoneOptions.push({ id: z.id, label: s.name + " / " + z.name })));
+    const renderRows = () => {
+      const rows = (state.campaigns || []).map((c) => {
+        const pl = playlistById(c.playlist_id);
+        return '<tr><td>' + esc(c.name) + '</td><td><span class="tag">' + esc(c.mode) + '</span></td><td>' + esc(pl ? pl.name : "#" + c.playlist_id) + '</td><td>' + esc(campaignTargetLabel(c)) + '</td><td class="mono">' + (c.priority || 0) + '</td><td><span class="tag">' + (c.enabled ? "ativa" : "pausada") + '</span></td><td class="right"><button class="btn ghost small" data-camp-toggle="' + c.id + '">' + ICONS.power + '</button><button class="btn danger small" data-camp-del="' + c.id + '">' + ICONS.trash + '</button></td></tr>';
+      }).join("") || '<tr><td colspan="7" class="empty">Nenhuma campanha cadastrada.</td></tr>';
+      modal.querySelector("#camp-list").innerHTML = rows;
+      bindRows();
+    };
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.branch + '</span><span class="modal-title">Campanhas P6</span></div>' +
+      '<div class="modal-body">' +
+        '<table class="set-table"><thead><tr><th>Nome</th><th>Modo</th><th>Playlist</th><th>Alvo</th><th>Prio</th><th>Status</th><th></th></tr></thead><tbody id="camp-list"></tbody></table>' +
+        '<label class="mm-label">Nova campanha</label>' +
+        '<div class="row" style="gap:10px"><div class="field grow"><label>Nome</label><input id="camp-name" placeholder="Ex.: Oferta relampago"/></div><div class="field"><label>Modo</label><select id="camp-mode"><option value="scheduled">Agendada</option><option value="interrupt">Interrupcao</option></select></div></div>' +
+        '<div class="row" style="gap:10px"><div class="field grow"><label>Playlist</label><select id="camp-playlist">' + state.playlists.map((p) => '<option value="' + p.id + '"' + (p.id === state.openPlaylistId ? " selected" : "") + '>' + esc(p.name) + '</option>').join("") + '</select></div><div class="field"><label>Prioridade</label><input id="camp-priority" type="number" value="10"/></div><div class="field"><label>Max/hora</label><input id="camp-max" type="number" min="1" placeholder="sem limite"/></div></div>' +
+        '<div class="row" style="gap:10px"><div class="field grow"><label>Tela alvo</label><select id="camp-screen"><option value="">Todas</option>' + state.screens.map((s) => '<option value="' + s.id + '">' + esc(s.name) + '</option>').join("") + '</select></div><div class="field grow"><label>Grupo alvo</label><select id="camp-group"><option value="">Nenhum</option>' + state.screenGroups.map((g) => '<option value="' + g.id + '">' + esc(g.name) + '</option>').join("") + '</select></div><div class="field grow"><label>Zona alvo</label><select id="camp-zone"><option value="">Todas as zonas</option>' + zoneOptions.map((z) => '<option value="' + z.id + '">' + esc(z.label) + '</option>').join("") + '</select></div></div>' +
+        '<div class="row" style="gap:10px"><div class="field grow"><label>Inicio</label><input id="camp-start" type="datetime-local"/></div><div class="field grow"><label>Fim</label><input id="camp-end" type="datetime-local"/></div></div>' +
+      '</div><div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button><button class="btn primary" data-create-camp>' + ICONS.plus + ' Criar campanha</button></div>';
+    const ui = buildOverlay(modal);
+    const bindRows = () => {
+      modal.querySelectorAll("[data-camp-toggle]").forEach((b) => b.addEventListener("click", async () => {
+        const c = state.campaigns.find((x) => String(x.id) === String(b.dataset.campToggle)); if (!c) return;
+        try { await updateCampaign(c.id, { enabled: !c.enabled }); state.campaigns = await loadCampaigns(); renderRows(); toast({ kind: "ok", msg: c.enabled ? "Campanha pausada." : "Campanha ativada." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+      }));
+      modal.querySelectorAll("[data-camp-del]").forEach((b) => b.addEventListener("click", async () => {
+        if (!(await confirmDialog({ title: "Excluir campanha", message: "Remover esta campanha?", icon: "trash", confirmText: "Excluir", danger: true }))) return;
+        try { await deleteCampaign(b.dataset.campDel); state.campaigns = await loadCampaigns(); renderRows(); toast({ kind: "warn", msg: "Campanha removida." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+      }));
+    };
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    modal.querySelector("[data-create-camp]").addEventListener("click", async () => {
+      const name = modal.querySelector("#camp-name").value.trim();
+      const playlistId = Number(modal.querySelector("#camp-playlist").value);
+      if (!name || !playlistId) { toast({ kind: "warn", msg: "Informe nome e playlist." }); return; }
+      const screenId = Number(modal.querySelector("#camp-screen").value);
+      const groupId = Number(modal.querySelector("#camp-group").value);
+      const zoneId = Number(modal.querySelector("#camp-zone").value);
+      const max = Number(modal.querySelector("#camp-max").value);
+      const body = {
+        name: name,
+        playlist_id: playlistId,
+        mode: modal.querySelector("#camp-mode").value,
+        screen_ids: screenId ? [screenId] : [],
+        screen_group_ids: groupId ? [groupId] : [],
+        zone_ids: zoneId ? [zoneId] : [],
+        start_at: modal.querySelector("#camp-start").value || null,
+        end_at: modal.querySelector("#camp-end").value || null,
+        priority: Number(modal.querySelector("#camp-priority").value) || 0,
+        enabled: true,
+      };
+      if (max > 0) body.max_plays_per_hour = max;
+      try { await createCampaign(body); state.campaigns = await loadCampaigns(); renderRows(); toast({ kind: "ok", msg: "Campanha criada." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
+    renderRows();
+  }
+
   // ---------------------------- Configuracoes ---------------------- //
   async function openSettings() {
     const modal = document.createElement("div");
     modal.className = "modal modal-wide";
     modal.innerHTML =
       '<div class="modal-head"><span class="modal-ico">' + ICONS.settings + '</span><span class="modal-title">Configuracoes</span></div>' +
-      '<div class="set-tabs"><button class="set-tab active" data-stab="account">' + ICONS.lock + ' Conta</button><button class="set-tab" data-stab="users">' + ICONS.user + ' Usuarios</button><button class="set-tab" data-stab="audit">' + ICONS.terminal + ' Auditoria</button></div>' +
+      '<div class="set-tabs"><button class="set-tab active" data-stab="account">' + ICONS.lock + ' Conta</button><button class="set-tab" data-stab="security">' + ICONS.shield + ' Seguranca</button><button class="set-tab" data-stab="users">' + ICONS.user + ' Usuarios</button><button class="set-tab" data-stab="system">' + ICONS.folder + ' Plataforma</button><button class="set-tab" data-stab="audit">' + ICONS.terminal + ' Auditoria</button></div>' +
       '<div class="modal-body" id="set-body"></div>' +
       '<div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button></div>';
     const ui = buildOverlay(modal);
     modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
     const body = modal.querySelector("#set-body");
     const tabs = modal.querySelectorAll(".set-tab");
+    const fmtDate = (v) => {
+      if (!v) return "-";
+      const d = typeof v === "number" ? new Date(v * 1000) : new Date(v);
+      return Number.isNaN(d.getTime()) ? "-" : d.toLocaleString("pt-BR");
+    };
     const show = async (tab) => {
       tabs.forEach((t) => t.classList.toggle("active", t.dataset.stab === tab));
       if (tab === "account") {
@@ -1836,6 +2375,69 @@
           if (nw !== cf) { toast({ kind: "warn", msg: "As senhas nao conferem." }); return; }
           try { await changePassword(cur, nw); toast({ kind: "ok", msg: "Senha alterada." }); ui.close(); } catch (err) { toast({ kind: "err", msg: err.message }); }
         });
+      } else if (tab === "security") {
+        body.innerHTML = '<p class="hint">Carregando...</p>';
+        try {
+          const me = await loadMe();
+          state.user = Object.assign({}, state.user || {}, me || {});
+          const tokens = await loadApiTokens();
+          const tokenRows = tokens.length ? tokens.map((t) => '<tr><td>' + esc(t.name) + '</td><td class="mono">' + esc(t.prefix) + '...</td><td>' + esc(t.scopes || "-") + '</td><td>' + (t.is_active ? "ativo" : "revogado") + '</td><td class="mono">' + esc(fmtDate(t.last_used_at)) + '</td><td><button class="btn danger small" data-revoke-token="' + t.id + '" ' + (!t.is_active ? "disabled" : "") + '>' + ICONS.trash + ' Revogar</button></td></tr>').join("") : '<tr><td colspan="6" class="empty">Nenhum token criado.</td></tr>';
+          body.innerHTML =
+            '<div class="row wrap" style="align-items:flex-start;gap:18px">' +
+              '<div class="grow" style="min-width:280px">' +
+                '<label class="mm-label">2FA por aplicativo autenticador</label>' +
+                '<p class="hint">Status: <strong>' + (me.totp_enabled ? "habilitado" : "desabilitado") + '</strong></p>' +
+                (me.totp_enabled
+                  ? '<div class="field"><label>Senha atual</label><input type="password" id="totp-pass" autocomplete="current-password"/></div><button class="btn danger" id="totp-disable">' + ICONS.lock + ' Desativar 2FA</button>'
+                  : '<button class="btn primary" id="totp-setup">' + ICONS.shield + ' Configurar 2FA</button><div id="totp-panel" hidden style="margin-top:12px"></div>') +
+              '</div>' +
+              '<div class="grow" style="min-width:320px">' +
+                '<label class="mm-label">Tokens de API</label>' +
+                '<div class="row wrap" style="gap:10px"><div class="field grow"><label>Nome</label><input id="api-token-name" placeholder="Integracao BI"/></div><div class="field"><label>Escopos</label><input id="api-token-scopes" value="read"/></div><div class="field"><label>Expira em</label><input id="api-token-exp" type="datetime-local"/></div></div>' +
+                '<button class="btn primary small" id="api-token-create">' + ICONS.plus + ' Criar token</button>' +
+                '<div id="api-token-once" class="hint" style="margin-top:10px"></div>' +
+              '</div>' +
+            '</div>' +
+            '<table class="set-table" style="margin-top:14px"><thead><tr><th>Nome</th><th>Prefixo</th><th>Escopos</th><th>Status</th><th>Ultimo uso</th><th></th></tr></thead><tbody>' + tokenRows + '</tbody></table>';
+          const setup = body.querySelector("#totp-setup");
+          if (setup) setup.addEventListener("click", async () => {
+            try {
+              const data = await setup2fa();
+              const panel = body.querySelector("#totp-panel");
+              panel.hidden = false;
+              panel.innerHTML = '<p class="hint">Adicione este segredo no app autenticador e confirme o codigo gerado.</p><div class="field"><label>Segredo</label><input class="mono" id="totp-secret" value="' + esc(data.secret) + '" readonly/></div><div class="field"><label>URI otpauth</label><input class="mono" id="totp-uri" value="' + esc(data.otpauth_url) + '" readonly/></div><div class="row wrap" style="gap:10px"><div class="field"><label>Codigo</label><input id="totp-code" inputmode="numeric" maxlength="8"/></div><button class="btn ghost" id="totp-copy-secret">' + ICONS.copy + ' Copiar segredo</button><button class="btn primary" id="totp-enable">' + ICONS.check + ' Ativar</button></div>';
+              panel.querySelector("#totp-copy-secret").addEventListener("click", () => copyText(data.secret));
+              panel.querySelector("#totp-enable").addEventListener("click", async () => {
+                const code = panel.querySelector("#totp-code").value.trim();
+                if (code.length < 6) { toast({ kind: "warn", msg: "Informe o codigo 2FA." }); return; }
+                try { await enable2fa(code); toast({ kind: "ok", msg: "2FA habilitado." }); show("security"); } catch (err) { toast({ kind: "err", msg: err.message }); }
+              });
+            } catch (err) { toast({ kind: "err", msg: err.message }); }
+          });
+          const disable = body.querySelector("#totp-disable");
+          if (disable) disable.addEventListener("click", async () => {
+            const pass = body.querySelector("#totp-pass").value;
+            if (!pass) { toast({ kind: "warn", msg: "Informe a senha atual." }); return; }
+            try { await disable2fa(pass); toast({ kind: "warn", msg: "2FA desativado." }); show("security"); } catch (err) { toast({ kind: "err", msg: err.message }); }
+          });
+          body.querySelector("#api-token-create").addEventListener("click", async () => {
+            const name = body.querySelector("#api-token-name").value.trim();
+            const scopes = body.querySelector("#api-token-scopes").value.split(",").map((s) => s.trim()).filter(Boolean);
+            const exp = body.querySelector("#api-token-exp").value;
+            if (name.length < 2) { toast({ kind: "warn", msg: "Informe um nome para o token." }); return; }
+            try {
+              const created = await createApiToken({ name, scopes: scopes.length ? scopes : ["read"], expires_at: exp || null });
+              const once = body.querySelector("#api-token-once");
+              once.innerHTML = '<strong>Token criado. Copie agora:</strong><div class="row" style="gap:8px;margin-top:6px"><input class="mono grow" id="api-token-value" value="' + esc(created.token) + '" readonly/><button class="btn ghost small" id="api-token-copy">' + ICONS.copy + ' Copiar</button></div>';
+              once.querySelector("#api-token-copy").addEventListener("click", () => copyText(created.token));
+              toast({ kind: "ok", msg: "Token de API criado." });
+            } catch (err) { toast({ kind: "err", msg: err.message }); }
+          });
+          body.querySelectorAll("[data-revoke-token]").forEach((b) => b.addEventListener("click", async () => {
+            if (!(await confirmDialog({ title: "Revogar token", message: "Este token deixara de autenticar integracoes externas.", icon: "trash", confirmText: "Revogar", danger: true }))) return;
+            try { await revokeApiToken(Number(b.dataset.revokeToken)); toast({ kind: "warn", msg: "Token revogado." }); show("security"); } catch (err) { toast({ kind: "err", msg: err.message }); }
+          }));
+        } catch (err) { body.innerHTML = '<p class="empty">' + esc(err.message) + '</p>'; }
       } else if (tab === "users") {
         body.innerHTML = '<p class="hint">Carregando...</p>';
         try {
@@ -1851,7 +2453,24 @@
             try { await createUser({ username, password, role }); toast({ kind: "ok", msg: "Usuario criado." }); show("users"); } catch (err) { toast({ kind: "err", msg: err.message }); }
           });
         } catch (err) { body.innerHTML = '<p class="empty">' + (/403|permiss|admin/i.test(err.message) ? "Apenas administradores podem gerenciar usuarios." : esc(err.message)) + '</p>'; }
-      } else {
+      } else if (tab === "system") {
+        body.innerHTML = '<p class="hint">Carregando...</p>';
+        try {
+          const backups = await loadBackups();
+          const rows = backups.length ? backups.map((b) => '<tr><td class="mono">' + esc(b.file) + '</td><td>' + Math.round((b.size || 0) / 1024) + ' KB</td><td class="mono">' + esc(fmtDate(b.modified_at)) + '</td><td><button class="btn ghost small" data-download-backup="' + esc(b.file) + '">' + ICONS.download + ' Baixar</button></td></tr>').join("") : '<tr><td colspan="4" class="empty">Nenhum backup encontrado.</td></tr>';
+          body.innerHTML =
+            '<label class="mm-label">Backups SQLite</label>' +
+            '<p class="hint">Backups automaticos rodam pelo agendador quando BACKUP_ENABLED=true. Use o botao abaixo para gerar um ponto manual antes de manutencoes.</p>' +
+            '<button class="btn primary" id="backup-run">' + ICONS.refresh + ' Gerar backup agora</button>' +
+            '<table class="set-table" style="margin-top:14px"><thead><tr><th>Arquivo</th><th>Tamanho</th><th>Modificado</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+          body.querySelector("#backup-run").addEventListener("click", async () => {
+            try { const r = await runBackup(); toast({ kind: "ok", msg: "Backup criado: " + r.file }); show("system"); } catch (err) { toast({ kind: "err", msg: err.message }); }
+          });
+          body.querySelectorAll("[data-download-backup]").forEach((b) => b.addEventListener("click", async () => {
+            try { await downloadBackup(b.dataset.downloadBackup); } catch (err) { toast({ kind: "err", msg: err.message }); }
+          }));
+        } catch (err) { body.innerHTML = '<p class="empty">' + (/403|permiss|admin/i.test(err.message) ? "Apenas administradores podem gerenciar backups." : esc(err.message)) + '</p>'; }
+      } else if (tab === "audit") {
         body.innerHTML = '<p class="hint">Carregando...</p>';
         try {
           const data = await loadAudit(80);
@@ -1869,7 +2488,7 @@
   function renderPlaylistDoc() {
     const pl = playlistById(state.openPlaylistId);
     if (!pl) return '<div class="empty">Nenhuma playlist selecionada. Use o botao + na barra lateral.</div>';
-    const head = '<div class="item-row row between" style="margin-bottom:12px"><strong style="font-size:14px">' + esc(pl.name) + '</strong><span class="row"><button class="btn ghost small" data-rename-pl>Renomear</button><button class="btn danger small" data-del-pl>' + ICONS.trash + ' Excluir</button></span></div>';
+    const head = '<div class="item-row row between" style="margin-bottom:12px"><strong style="font-size:14px">' + esc(pl.name) + '</strong><span class="row"><button class="btn ghost small" data-campaigns>' + ICONS.branch + ' Campanhas</button><button class="btn ghost small" data-export-pl title="Exportar playlist (JSON)">Exportar</button><button class="btn ghost small" data-import-pl title="Importar playlist (JSON)">Importar</button><button class="btn ghost small" data-rename-pl>Renomear</button><button class="btn danger small" data-del-pl>' + ICONS.trash + ' Excluir</button></span></div>';
     const items = pl.items.length ? pl.items.map((it, i) => itemRow(pl, it, i)).join("") : '<div class="empty">Sem itens. Adicione abaixo.</div>';
     const mediaOpts = state.media.map((m) => '<option value="' + m.id + '">' + esc(m.name) + ' (' + TYPE_LABEL[m.type] + ')</option>').join("");
     const add = '<div class="item-row row wrap" style="margin-top:12px;gap:10px"><select id="pi-media" style="flex:1;min-width:160px">' + mediaOpts + '</select><input id="pi-dur" type="number" min="1" value="10" class="mini" title="Duracao (s)"/><select id="pi-fit">' + FITS.map((f) => '<option value="' + f + '">' + FIT_LABELS[f] + '</option>').join("") + '</select><select id="pi-focal" title="Ponto focal">' + FOCALS.map((f) => '<option value="' + f + '">' + FOCAL_LABELS[f] + '</option>').join("") + '</select><select id="pi-trans">' + TRANSITIONS.map((t) => '<option>' + t + '</option>').join("") + '</select><label class="row" style="gap:5px"><input id="pi-sound" type="checkbox"/> som</label><label class="row" style="gap:5px" title="Tocar a midia inteira"><input id="pi-full" type="checkbox"/> completo</label><button class="btn primary small" id="pi-add">' + ICONS.plus + ' Item</button></div>';
@@ -1884,11 +2503,19 @@
       '<select data-it-trans="' + it.id + '">' + TRANSITIONS.map((t) => '<option ' + (t === it.transition ? "selected" : "") + '>' + t + '</option>').join("") + '</select>' +
       '<label class="row" style="gap:4px" title="Som"><input type="checkbox" data-it-sound="' + it.id + '" ' + (it.muted ? "" : "checked") + '/></label>' +
       '<label class="row" style="gap:4px" title="Tocar a midia inteira (video/audio/YouTube)"><input type="checkbox" data-it-full="' + it.id + '" ' + (it.play_full ? "checked" : "") + '/>\u25B6</label>' +
+      '<input type="datetime-local" class="mini" data-it-start="' + it.id + '" value="' + (it.start_at ? String(it.start_at).slice(0, 16) : "") + '" title="Inicio da validade (opcional)"/>' +
+      '<input type="datetime-local" class="mini" data-it-end="' + it.id + '" value="' + (it.end_at ? String(it.end_at).slice(0, 16) : "") + '" title="Fim da validade (opcional)"/>' +
+      '<input type="number" min="1" class="mini" data-it-maxph="' + it.id + '" value="' + (it.max_plays_per_hour || "") + '" title="Max. exibicoes por hora"/>' +
       '<button class="btn ghost small" data-it-up="' + it.id + '">' + ICONS.up + '</button><button class="btn ghost small" data-it-down="' + it.id + '">' + ICONS.down + '</button>' +
       '<button class="btn danger small" data-it-del="' + it.id + '">' + ICONS.trash + '</button></div>';
   }
   function bindPlaylistDoc() {
     const doc = $("doc"); const pl = playlistById(state.openPlaylistId); if (!pl) return;
+    const ex = doc.querySelector("[data-export-pl]");
+    const camp = doc.querySelector("[data-campaigns]"); if (camp) camp.addEventListener("click", openCampaignsModal);
+    if (ex) ex.addEventListener("click", async () => { try { const data = await api("/api/playlists/" + pl.id + "/export"); const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "playlist-" + String(pl.name || pl.id).replace(/[^a-z0-9_-]+/gi, "_") + ".json"; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0); } catch (err) { toast({ kind: "err", msg: err.message }); } });
+    const imp = doc.querySelector("[data-import-pl]");
+    if (imp) imp.addEventListener("click", () => { const inp = document.createElement("input"); inp.type = "file"; inp.accept = "application/json,.json"; inp.addEventListener("change", async () => { const file = inp.files && inp.files[0]; if (!file) return; try { const text = await file.text(); const data = JSON.parse(text); await api("/api/playlists/import", { method: "POST", body: JSON.stringify(data) }); await loadPlaylists(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: "Playlist importada." }); } catch (err) { toast({ kind: "err", msg: "Falha ao importar: " + err.message }); } }); inp.click(); });
     const rn = doc.querySelector("[data-rename-pl]"); if (rn) rn.addEventListener("click", async () => { const name = await promptDialog({ title: "Renomear playlist", message: "Digite o novo nome da playlist:", icon: "playlist", defaultValue: pl.name, placeholder: "Nome da playlist", confirmText: "Salvar" }); if (!name) return; try { await api("/api/playlists/" + pl.id, { method: "PATCH", body: JSON.stringify({ name }) }); await loadPlaylists(); renderSidebar(); renderDoc(); toast({ kind: "ok", msg: "Playlist renomeada." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
     const dp = doc.querySelector("[data-del-pl]"); if (dp) dp.addEventListener("click", async () => { if (!(await confirmDialog({ title: "Excluir playlist", message: "Tem certeza que deseja excluir esta playlist?", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await api("/api/playlists/" + pl.id, { method: "DELETE" }); state.openPlaylistId = null; await loadPlaylists(); fixSelection(); renderSidebar(); renderDoc(); renderBottom(); toast({ kind: "warn", msg: "Playlist excluida." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
     const add = $("pi-add"); if (add) add.addEventListener("click", async () => { const media_id = Number($("pi-media").value); if (!media_id) { toast({ kind: "warn", msg: "Selecione uma midia." }); return; } const body = { media_id, duration: Number($("pi-dur").value) || 10, fit: $("pi-fit").value, focal: $("pi-focal").value, transition: $("pi-trans").value, muted: !$("pi-sound").checked, play_full: $("pi-full") ? $("pi-full").checked : false }; try { await api("/api/playlists/" + pl.id + "/items", { method: "POST", body: JSON.stringify(body) }); await loadPlaylists(); renderSidebar(); renderDoc(); renderBottom(); toast({ kind: "ok", msg: "Item adicionado." }); } catch (err) { toast({ kind: "err", msg: err.message }); } });
@@ -1898,6 +2525,9 @@
     doc.querySelectorAll("[data-it-trans]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itTrans, { transition: el.value })));
     doc.querySelectorAll("[data-it-sound]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itSound, { muted: !el.checked })));
     doc.querySelectorAll("[data-it-full]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itFull, { play_full: el.checked })));
+    doc.querySelectorAll("[data-it-start]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itStart, { start_at: el.value || null })));
+    doc.querySelectorAll("[data-it-end]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itEnd, { end_at: el.value || null })));
+    doc.querySelectorAll("[data-it-maxph]").forEach((el) => el.addEventListener("change", () => updateItem(pl.id, el.dataset.itMaxph, { max_plays_per_hour: el.value ? Number(el.value) : null })));
     doc.querySelectorAll("[data-it-del]").forEach((el) => el.addEventListener("click", async () => { try { await api("/api/playlists/" + pl.id + "/items/" + el.dataset.itDel, { method: "DELETE" }); await loadPlaylists(); renderSidebar(); renderDoc(); renderBottom(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
     doc.querySelectorAll("[data-it-up]").forEach((el) => el.addEventListener("click", () => moveItem(pl, Number(el.dataset.itUp), -1)));
     doc.querySelectorAll("[data-it-down]").forEach((el) => el.addEventListener("click", () => moveItem(pl, Number(el.dataset.itDown), 1)));
@@ -2008,7 +2638,11 @@
     { icon: "refresh", label: "Recarregar dados", run: () => loadAll() },
     { icon: "sun", label: "Alternar tema claro/escuro", run: () => toggleTheme() },
     { icon: "wifi", label: "Saude das telas (online/offline)", run: () => reportHealth() },
+    { icon: "wifi", label: "Abrir mapa/lista operacional de telas", run: () => openHealthPanel() },
+    { icon: "eye", label: "Solicitar screenshot da tela atual", run: () => { const s = screen(); if (s) screenCommand(s, "screenshot"); } },
+    { icon: "info", label: "Identificar tela atual", run: () => { const s = screen(); if (s) screenCommand(s, "identify"); } },
     { icon: "timeline", label: "Relatorio de exibicao (proof-of-play 7d)", run: () => reportProofOfPlay() },
+    { icon: "timeline", label: "Abrir BI / exportar proof-of-play", run: () => openBIModal() },
     { icon: "info", label: "Abrir guia de uso (tutorial)", run: () => openOnboard() },
     { icon: "power", label: "Sair (logout)", run: () => logout() },
   ];
@@ -2098,9 +2732,14 @@
       e.preventDefault();
       const password = $("login-password").value; const errEl = $("login-error"); errEl.textContent = "";
       const usernameEl = $("login-username"); const username = usernameEl && usernameEl.value.trim() ? usernameEl.value.trim() : undefined;
+      const totpEl = $("login-totp"); const totpCode = totpEl && totpEl.value.trim() ? totpEl.value.trim() : undefined;
       try {
-        const resp = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: username, password: password }) });
-        if (!resp.ok) throw new Error("Senha incorreta.");
+        const resp = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: username, password: password, totp_code: totpCode }) });
+        if (!resp.ok) {
+          let detail = "Credenciais incorretas.";
+          try { const j = await resp.json(); detail = j.detail || detail; } catch (err) { /* ignore */ }
+          throw new Error(detail);
+        }
         const json = await resp.json(); token = json.token; state.user = { username: json.username, role: json.role, is_super_admin: !!json.is_super_admin, company_id: json.company_id, company_name: json.company_name }; state.activeCompanyId = null; localStorage.setItem(TOKEN_KEY, token); await showApp(); if (state.user && state.user.is_super_admin) openSuperAdmin();
       } catch (err) { errEl.textContent = err.message; }
     });

@@ -379,6 +379,123 @@
     return wrap;
   }
 
+  // ---- P5: widgets avancados (PDF/web, relogio mundial, agenda, acoes, menu, dataset) ---- //
+  function buildWorldClockWidget(cfg) {
+    const wrap = document.createElement("div");
+    wrap.className = "widget widget-worldclock";
+    const zones = Array.isArray(cfg.zones) && cfg.zones.length
+      ? cfg.zones
+      : [{ label: "Local", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }];
+    const title = cfg.title ? '<div class="w-title">' + escapeText(cfg.title) + '</div>' : "";
+    wrap.innerHTML = title + '<div class="wc-grid"></div>';
+    const grid = wrap.querySelector(".wc-grid");
+    keepWhileConnected(wrap, () => {
+      grid.innerHTML = zones.map((zone) => {
+        const tz = zone.timezone || zone.tz || "UTC";
+        let time = "--:--";
+        try {
+          time = new Date().toLocaleTimeString("pt-BR", {
+            hour: "2-digit", minute: "2-digit", second: cfg.seconds === false ? undefined : "2-digit",
+            timeZone: tz,
+          });
+        } catch (e) { time = "--:--"; }
+        return '<div class="wc-row"><span class="wc-city">' + escapeText(zone.label || tz) +
+          '</span><span class="wc-time">' + escapeText(time) + '</span></div>';
+      }).join("");
+    }, 1000);
+    return wrap;
+  }
+
+  function buildCalendarWidget(cfg) {
+    const wrap = document.createElement("div");
+    wrap.className = "widget widget-calendar";
+    const events = Array.isArray(cfg.events) ? cfg.events : [];
+    const title = cfg.title ? '<div class="w-title">' + escapeText(cfg.title) + '</div>' : "";
+    const sorted = events.slice().sort((a, b) => String(a.date || "").localeCompare(String(b.date || ""))).slice(0, 12);
+    wrap.innerHTML = title + '<div class="cal-list">' + (sorted.length ? sorted.map((ev) => {
+      const date = ev.date ? new Date(ev.date) : null;
+      const when = date && !isNaN(date.getTime())
+        ? date.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }) + (ev.time ? " " + ev.time : "")
+        : (ev.when || "");
+      return '<div class="cal-row"><span class="cal-date">' + escapeText(when) +
+        '</span><span class="cal-title">' + escapeText(ev.title || ev.name || "") +
+        '</span></div>';
+    }).join("") : '<div class="cal-empty">Sem eventos.</div>') + '</div>';
+    return wrap;
+  }
+
+  function buildStocksWidget(cfg) {
+    const wrap = document.createElement("div");
+    wrap.className = "widget widget-stocks";
+    const symbols = Array.isArray(cfg.symbols) ? cfg.symbols.filter(Boolean) : [];
+    const fallback = Array.isArray(cfg.fallback) ? cfg.fallback : [];
+    const title = cfg.title ? '<div class="w-title">' + escapeText(cfg.title) + '</div>' : "";
+    wrap.innerHTML = title + '<div class="st-list">Carregando mercado...</div>';
+    const list = wrap.querySelector(".st-list");
+    const render = (items) => {
+      if (!items.length) { list.textContent = "Cotações indisponíveis."; return; }
+      list.innerHTML = items.map((it) => '<div class="st-row"><span class="st-symbol">' +
+        escapeText(it.symbol || it.name || "") + '</span><span class="st-price">' +
+        escapeText(it.close || it.price || "--") + '</span></div>').join("");
+    };
+    const load = async () => {
+      if (!symbols.length) { render(fallback); return; }
+      try {
+        const res = await fetch("/api/widgets/stocks?symbols=" + encodeURIComponent(symbols.join(","))).then((r) => r.json());
+        const items = (res && res.items) ? res.items : [];
+        render(items.length ? items : fallback);
+      } catch (e) { render(fallback); }
+    };
+    keepWhileConnected(wrap, load, 600000);
+    return wrap;
+  }
+
+  function buildMenuBoardWidget(cfg) {
+    const wrap = document.createElement("div");
+    wrap.className = "widget widget-menuboard";
+    const groups = Array.isArray(cfg.categories) ? cfg.categories : [];
+    const title = cfg.title ? '<div class="w-title">' + escapeText(cfg.title) + '</div>' : "";
+    wrap.innerHTML = title + '<div class="mb-grid">' + groups.map((cat) => {
+      const items = Array.isArray(cat.items) ? cat.items : [];
+      return '<section class="mb-cat"><h3>' + escapeText(cat.name || "Menu") + '</h3>' +
+        items.map((it) => '<div class="mb-item"><span><b>' + escapeText(it.name || "") +
+        '</b>' + (it.note ? '<small>' + escapeText(it.note) + '</small>' : "") +
+        '</span><strong>' + escapeText(it.price || "") + '</strong></div>').join("") +
+        '</section>';
+    }).join("") + '</div>';
+    return wrap;
+  }
+
+  function buildDatasetWidget(cfg) {
+    const wrap = document.createElement("div");
+    wrap.className = "widget widget-dataset";
+    const title = cfg.title ? '<div class="w-title">' + escapeText(cfg.title) + '</div>' : "";
+    wrap.innerHTML = title + '<div class="ds-table">Carregando dados...</div>';
+    const target = wrap.querySelector(".ds-table");
+    const fallback = Array.isArray(cfg.rows) ? cfg.rows : [];
+    const render = (rows, columns) => {
+      rows = Array.isArray(rows) ? rows.slice(0, Number(cfg.limit) || 12) : [];
+      columns = Array.isArray(columns) && columns.length
+        ? columns
+        : Object.keys(rows[0] || {}).map((key) => ({ key: key, label: key }));
+      if (!rows.length || !columns.length) { target.textContent = "Sem dados."; return; }
+      target.innerHTML = '<table><thead><tr>' + columns.map((c) =>
+        '<th>' + escapeText(c.label || c.key) + '</th>').join("") + '</tr></thead><tbody>' +
+        rows.map((row) => '<tr>' + columns.map((c) =>
+          '<td>' + escapeText(row[c.key] == null ? "" : row[c.key]) + '</td>').join("") + '</tr>').join("") +
+        '</tbody></table>';
+    };
+    const load = async () => {
+      if (!cfg.dataset_id) { render(fallback, cfg.columns || []); return; }
+      try {
+        const res = await fetch("/api/widgets/datasets/" + encodeURIComponent(cfg.dataset_id)).then((r) => r.json());
+        render((res && res.rows && res.rows.length) ? res.rows : fallback, (res && res.columns) || cfg.columns || []);
+      } catch (e) { render(fallback, cfg.columns || []); }
+    };
+    keepWhileConnected(wrap, load, Math.max(30000, Number(cfg.refreshMs) || 300000));
+    return wrap;
+  }
+
   // ---- v34: video ao vivo HLS (.m3u8), nativo + fallback hls.js ---- //
   let __hlsPromise = null;
   function loadHlsLib() {
@@ -516,7 +633,9 @@
       }
       case "youtube":
       case "embed":
-      case "url": {
+      case "url":
+      case "pdf":
+      case "webpage": {
         const iframe = document.createElement("iframe");
         iframe.src = item.type === "youtube" ? youtubeEmbedUrl(item.url, item) : item.url;
         iframe.setAttribute("frameborder", "0");
@@ -551,6 +670,16 @@
         return buildQrWidget(parseConfig(item));
       case "rates":
         return buildRatesWidget(parseConfig(item));
+      case "worldclock":
+        return buildWorldClockWidget(parseConfig(item));
+      case "calendar":
+        return buildCalendarWidget(parseConfig(item));
+      case "stocks":
+        return buildStocksWidget(parseConfig(item));
+      case "menuboard":
+        return buildMenuBoardWidget(parseConfig(item));
+      case "dataset":
+        return buildDatasetWidget(parseConfig(item));
       case "live": {
         const video = document.createElement("video");
         video.autoplay = true;
@@ -845,6 +974,79 @@
     }
   }
 
+  async function reportCommandResult(commandId, body) {
+    try {
+      await fetch(`/api/display/${encodeURIComponent(screenSlug)}/commands/${commandId}/result`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || { status: "done" }),
+      });
+    } catch (err) {
+      console.warn("Falha ao reportar comando:", err);
+    }
+  }
+
+  function identifyScreen() {
+    const el = document.createElement("div");
+    el.style.cssText = "position:fixed;inset:3vmin;z-index:99999;border:1vmin solid #7aa2f7;border-radius:2vmin;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.72);color:#fff;font:700 8vmin system-ui;text-align:center;pointer-events:none";
+    el.textContent = "tvMedia - " + screenSlug;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 8000);
+  }
+
+  async function captureScreenshotDataUrl() {
+    const w = Math.max(320, window.innerWidth || document.documentElement.clientWidth || 1280);
+    const h = Math.max(240, window.innerHeight || document.documentElement.clientHeight || 720);
+    const clone = document.documentElement.cloneNode(true);
+    clone.querySelectorAll("script").forEach((node) => node.remove());
+    const html = new XMLSerializer().serializeToString(clone);
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"><foreignObject width="100%" height="100%">' + html + '</foreignObject></svg>';
+    const img = new Image();
+    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    try {
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = url;
+      });
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      return canvas.toDataURL("image/png");
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function handleCommand(data) {
+    const id = data.command_id;
+    const command = data.command;
+    if (!id || !command) return;
+    try {
+      if (command === "reload") {
+        await refresh(true);
+        await reportCommandResult(id, { status: "done", result: "Conteudo recarregado." });
+      } else if (command === "identify") {
+        identifyScreen();
+        await reportCommandResult(id, { status: "done", result: "Identificacao exibida no player." });
+      } else if (command === "screenshot") {
+        try {
+          const dataUrl = await captureScreenshotDataUrl();
+          await reportCommandResult(id, { status: "done", result: "Screenshot capturado pelo navegador.", data_url: dataUrl });
+        } catch (err) {
+          await reportCommandResult(id, { status: "failed", result: "Screenshot indisponivel neste navegador: " + (err && err.message ? err.message : String(err)) });
+        }
+      } else {
+        await reportCommandResult(id, { status: "unsupported", result: "Comando requer hardware/agente externo: " + command });
+      }
+    } catch (err) {
+      await reportCommandResult(id, { status: "failed", result: err && err.message ? err.message : String(err) });
+    }
+  }
+
   /** Abre (ou reabre) o WebSocket de tempo real, com reconexão automática. */
   function connectSocket() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -863,6 +1065,7 @@
       let data;
       try { data = JSON.parse(event.data); } catch { return; }
       if (data.type === "reload") refresh(false);
+      else if (data.type === "command") handleCommand(data);
     });
 
     socket.addEventListener("close", () => {

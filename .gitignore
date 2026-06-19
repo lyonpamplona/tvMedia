@@ -1,19 +1,39 @@
 # Python
 __pycache__/
 *.py[cod]
+.pytest_cache/
+pytest-cache-files-*/
+.coverage
+htmlcov/
+
+# Ambientes locais
+.env
 .venv/
 venv/
+env/
 
-# Dados locais
+# Dados gerados pelo tvMedia
 backend/data/
 data/
 *.db
-*.sqlite3
+*.db-shm
+*.db-wal
+frontend/admin/icons/*.tmp
+/landing-clientes
+APRESENTACAO.html
+ROADMAP.md
+ROADMAP_CORRETIVO.md
+AUDITORIA_CODIGO.md
+RELATORIO_TECNICO.md
 
-# Ambiente
-.env
-commitar.sh
-# Editores
-.vscode/
-.idea/
+# Node/editor/SO
+node_modules/
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs e builds
+*.log
+dist/
+build/

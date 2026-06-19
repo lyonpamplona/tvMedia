@@ -12,8 +12,11 @@ Dominio multi-empresa (multi-tenant):
   emparelhamento e grupo de sincronia opcional.
 * :class:`Zone` — regiao retangular (em %) de uma tela, com playlist padrao.
 * :class:`Schedule` — regra de agendamento por dia/hora e faixa de datas.
+* :class:`Campaign` — campanha publicada/agendada que pode sobrepor playlists.
+* :class:`DataSet` — fonte tabular/JSON usada por widgets dinamicos.
 * :class:`AuditLog` — trilha de auditoria das alteracoes administrativas.
 * :class:`PlayEvent` — registro de reproducao (proof-of-play).
+* :class:`ReportSchedule` — envio agendado de relatórios P7.
 """
 
 from __future__ import annotations
@@ -58,6 +61,13 @@ class MediaType(str, enum.Enum):
     qrcode = "qrcode"
     rates = "rates"
     live = "live"
+    pdf = "pdf"
+    webpage = "webpage"
+    worldclock = "worldclock"
+    calendar = "calendar"
+    stocks = "stocks"
+    menuboard = "menuboard"
+    dataset = "dataset"
 
 
 class FitMode(str, enum.Enum):
@@ -157,6 +167,9 @@ class User(Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # P8: autenticação em duas etapas TOTP.
+    totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -165,6 +178,29 @@ class User(Base):
     )
 
     company: Mapped["Company | None"] = relationship()
+
+
+class ApiToken(Base):
+    """Token de API pessoal para integrações externas (P8).
+
+    O valor completo nunca é armazenado; apenas SHA-256 do token.
+    """
+
+    __tablename__ = "api_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    prefix: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    scopes: Mapped[str] = mapped_column(String(255), nullable=False, default="read")
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship()
 
 
 class MediaFolder(Base):
@@ -176,6 +212,24 @@ class MediaFolder(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     parent_id: Mapped[int | None] = mapped_column(
         ForeignKey("media_folders.id", ondelete="SET NULL"), nullable=True
+    )
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class PlaylistFolder(Base):
+    """Pasta para organizar playlists, com hierarquia opcional (P3)."""
+
+    __tablename__ = "playlist_folders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("playlist_folders.id", ondelete="SET NULL"), nullable=True
     )
     company_id: Mapped[int | None] = mapped_column(
         ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
@@ -213,6 +267,12 @@ class Media(Base):
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Tags livres separadas por virgula (ex.: "promo,verao").
     tags: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Data/hora de expiracao: apos isso a midia nao e mais exibida (P3).
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # P7: permite desligar proof-of-play para midias sensiveis/dispensaveis.
+    collect_stats: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     folder_id: Mapped[int | None] = mapped_column(
         ForeignKey("media_folders.id", ondelete="SET NULL"), nullable=True
     )
@@ -236,6 +296,11 @@ class Playlist(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Tags livres separadas por virgula (ex.: "campanha,loja-1").
+    tags: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    folder_id: Mapped[int | None] = mapped_column(
+        ForeignKey("playlist_folders.id", ondelete="SET NULL"), nullable=True
+    )
     company_id: Mapped[int | None] = mapped_column(
         ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
     )
@@ -251,6 +316,7 @@ class Playlist(Base):
         cascade="all, delete-orphan",
         order_by="PlaylistItem.position",
     )
+    folder: Mapped["PlaylistFolder | None"] = relationship()
 
 
 class PlaylistItem(Base):
@@ -278,6 +344,15 @@ class PlaylistItem(Base):
     muted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Tocar a midia inteira (video/audio/YouTube) em vez de cortar na duracao.
     play_full: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Janela de validade do item (P3): exibido somente entre start_at e end_at.
+    start_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    end_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # P6: limite operacional para campanhas de anuncio.
+    max_plays_per_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     playlist: Mapped["Playlist"] = relationship(back_populates="items")
     media: Mapped["Media"] = relationship(back_populates="items")
@@ -299,6 +374,22 @@ class Screen(Base):
     )
     # Grupo de sincronia: telas no mesmo grupo recarregam juntas (parque de TVs).
     sync_group: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # P6: fluxo de edicao/publicacao e trava de layout.
+    publish_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="published"
+    )
+    publish_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    layout_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Tags livres usadas por grupos dinamicos e filtros de parque (P4).
+    tags: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    location_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Resolucao nativa do painel (ex.: "1920x1080"), orientacao e tamanho em polegadas.
     resolution: Mapped[str | None] = mapped_column(String(16), nullable=True)
     orientation: Mapped[str] = mapped_column(String(16), nullable=False, default="landscape")
@@ -319,6 +410,8 @@ class Screen(Base):
     background_audio_id: Mapped[int | None] = mapped_column(
         ForeignKey("media.id", ondelete="SET NULL"), nullable=True
     )
+    # P7: coleta de proof-of-play por tela.
+    collect_stats: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # P0: tema de cores da tela (aplicado como CSS vars no player).
     theme_bg: Mapped[str | None] = mapped_column(String(16), nullable=True)
     theme_text: Mapped[str | None] = mapped_column(String(16), nullable=True)
@@ -369,6 +462,76 @@ class Overlay(Base):
     )
 
     screen: Mapped["Screen"] = relationship(back_populates="overlays")
+
+
+class ScreenGroup(Base):
+    """Grupo de telas para gestao em escala (P4).
+
+    ``mode`` pode ser ``static`` (IDs em ``screen_ids``) ou ``dynamic`` (tags em
+    ``tags``). O grupo nao substitui ``sync_group``: ele organiza, filtra e
+    permite acoes em lote; o ``sync_group`` continua sendo o mecanismo de
+    recarga sincronizada do player.
+    """
+
+    __tablename__ = "screen_groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="static")
+    screen_ids: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    sync_group: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class PlayerCommand(Base):
+    """Comando solicitado ao player/hardware de uma tela (P4)."""
+
+    __tablename__ = "player_commands"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    screen_id: Mapped[int] = mapped_column(
+        ForeignKey("screens.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    command_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    requested_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    screen: Mapped["Screen"] = relationship()
+
+
+class OfflineAlert(Base):
+    """Controle de alertas de tela offline para evitar spam (P4)."""
+
+    __tablename__ = "offline_alerts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    screen_id: Mapped[int] = mapped_column(
+        ForeignKey("screens.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    last_alert_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    is_offline: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class Zone(Base):
@@ -432,6 +595,80 @@ class Schedule(Base):
     playlist: Mapped["Playlist"] = relationship()
 
 
+class Campaign(Base):
+    """Campanha P6 para publicacao agendada ou interrupcao de layout.
+
+    A segmentacao usa JSON textual para manter compatibilidade com SQLite:
+    ``screen_ids`` e ``screen_group_ids`` definem o alvo, enquanto ``zone_ids``
+    restringe a zonas especificas quando a campanha nao for de interrupcao.
+    """
+
+    __tablename__ = "campaigns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    playlist_id: Mapped[int] = mapped_column(
+        ForeignKey("playlists.id", ondelete="CASCADE"), nullable=False
+    )
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="scheduled")
+    screen_ids: Mapped[str | None] = mapped_column(Text, nullable=True)
+    screen_group_ids: Mapped[str | None] = mapped_column(Text, nullable=True)
+    zone_ids: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    max_plays_per_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    playlist: Mapped["Playlist"] = relationship()
+
+
+class DataSet(Base):
+    """Fonte de dados estruturados para widgets P5.
+
+    ``rows`` e ``columns`` ficam em JSON textual para manter SQLite leve e
+    simples de migrar, sem exigir extensoes de banco.
+    """
+
+    __tablename__ = "datasets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False, default="table")
+    source_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    columns: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rows: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fallback_rows: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="idle"
+    )
+    refresh_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_refresh_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class AuditLog(Base):
     """Trilha de auditoria de acoes administrativas."""
 
@@ -468,4 +705,29 @@ class PlayEvent(Base):
     duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     played_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+class ReportSchedule(Base):
+    """Relatorio agendado por e-mail (P7)."""
+
+    __tablename__ = "report_schedules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    recipients: Mapped[str] = mapped_column(Text, nullable=False)
+    frequency: Mapped[str] = mapped_column(String(16), nullable=False, default="daily")
+    hour: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
+    days: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
+    screen_slug: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

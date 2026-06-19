@@ -48,6 +48,12 @@ def _validate_playlist(
             raise HTTPException(status_code=400, detail="Playlist inexistente.")
 
 
+def _layout_fields_locked(data: schemas.ZoneUpdate) -> bool:
+    """True se o patch tenta alterar geometria/estrutura de layout."""
+    locked_fields = {"name", "x", "y", "width", "height", "z_index"}
+    return any(field in data.model_fields_set for field in locked_fields)
+
+
 @router.post(
     "/{screen_id}/zones", response_model=schemas.ZoneRead, status_code=201
 )
@@ -61,6 +67,8 @@ async def create_zone(
     screen = crud.get_screen(db, screen_id)
     if screen is None or not scope_can_access(scope, screen.company_id):
         raise HTTPException(status_code=404, detail="Tela não encontrada.")
+    if screen.layout_locked:
+        raise HTTPException(status_code=423, detail="Layout travado para esta tela.")
     _validate_playlist(db, data.default_playlist_id, scope)
     zone = crud.create_zone(db, screen, data)
     await notify_screen(screen.slug, reason="zone-created")
@@ -77,9 +85,11 @@ async def update_zone(
 ) -> models.Zone:
     """Atualiza geometria, nome ou playlist padrão de uma zona."""
     zone = _get_owned_zone(db, screen_id, zone_id, scope)
+    screen = crud.get_screen(db, screen_id)
+    if screen is not None and screen.layout_locked and _layout_fields_locked(data):
+        raise HTTPException(status_code=423, detail="Layout travado para esta tela.")
     _validate_playlist(db, data.default_playlist_id, scope)
     zone = crud.update_zone(db, zone, data)
-    screen = crud.get_screen(db, screen_id)
     if screen is not None:
         await notify_screen(screen.slug, reason="zone-updated")
     return zone
@@ -99,6 +109,8 @@ async def delete_zone(
     """Remove uma zona da tela e notifica o player."""
     zone = _get_owned_zone(db, screen_id, zone_id, scope)
     screen = crud.get_screen(db, screen_id)
+    if screen is not None and screen.layout_locked:
+        raise HTTPException(status_code=423, detail="Layout travado para esta tela.")
     crud.delete_zone(db, zone)
     if screen is not None:
         await notify_screen(screen.slug, reason="zone-deleted")

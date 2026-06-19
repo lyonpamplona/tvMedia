@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
+
+import requests
 
 from fastapi import (
     APIRouter,
@@ -46,6 +49,17 @@ _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
 _VIDEO_EXTS = {".mp4", ".webm", ".ogg", ".mov", ".mkv"}
 _AUDIO_EXTS = {".mp3", ".m4a", ".aac", ".oga", ".wav", ".flac"}
 
+# Fallback de extensao por content-type quando a URL nao traz sufixo (P3).
+_EXT_BY_MIME = {
+    "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
+    "image/webp": ".webp", "image/bmp": ".bmp", "image/svg+xml": ".svg",
+    "video/mp4": ".mp4", "video/webm": ".webm", "video/ogg": ".ogg",
+    "video/quicktime": ".mov", "video/x-matroska": ".mkv",
+    "audio/mpeg": ".mp3", "audio/mp4": ".m4a", "audio/aac": ".aac",
+    "audio/ogg": ".oga", "audio/wav": ".wav", "audio/x-wav": ".wav",
+    "audio/flac": ".flac",
+}
+
 # Prefixos de content-type aceitos por tipo (defesa adicional além da extensão).
 _IMAGE_MIME_PREFIX = "image/"
 _VIDEO_MIME_PREFIX = "video/"
@@ -56,9 +70,12 @@ _AUDIO_MIME_PREFIX = "audio/"
 _UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 
-def _validate_folder(db: Session, folder_id: int | None) -> None:
-    """Garante que a pasta informada existe (quando informada)."""
-    if folder_id is not None and crud.get_folder(db, folder_id) is None:
+def _validate_folder(db: Session, folder_id: int | None, scope: Scope) -> None:
+    """Garante que a pasta informada existe e pertence ao escopo atual."""
+    if folder_id is None:
+        return
+    folder = crud.get_folder(db, folder_id)
+    if folder is None or not scope_can_access(scope, folder.company_id):
         raise HTTPException(status_code=400, detail="Pasta inexistente.")
 
 
@@ -190,7 +207,7 @@ async def create_media(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Imagens, vídeos e áudios devem ser enviados via /api/media/upload.",
         )
-    _validate_folder(db, data.folder_id)
+    _validate_folder(db, data.folder_id, scope)
     media = crud.create_media(
         db,
         name=data.name,
@@ -200,6 +217,8 @@ async def create_media(
         tags=data.tags,
         folder_id=data.folder_id,
         company_id=scope.write_company_id,
+        expires_at=data.expires_at,
+        collect_stats=data.collect_stats,
     )
     await notify_all_screens(db, reason="media-created")
     return media
@@ -227,7 +246,7 @@ async def bulk_create_media(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Importação em massa não aceita imagens/vídeos/áudios.",
             )
-        _validate_folder(db, item.folder_id)
+        _validate_folder(db, item.folder_id, scope)
         created.append(
             crud.create_media(
                 db,
@@ -238,6 +257,8 @@ async def bulk_create_media(
                 tags=item.tags,
                 folder_id=item.folder_id,
                 company_id=scope.write_company_id,
+                expires_at=item.expires_at,
+                collect_stats=True,
             )
         )
     if created:
@@ -296,7 +317,7 @@ async def upload_media(
             detail=f"Extensão não suportada: {suffix or '(desconhecida)'}",
         )
 
-    _validate_folder(db, folder_id)
+    _validate_folder(db, folder_id, scope)
 
     unique_name = f"{uuid.uuid4().hex}{suffix}"
     destination = settings.media_dir / unique_name
@@ -459,10 +480,28 @@ async def update_media(
     if media is None or not scope_can_access(scope, media.company_id):
         raise HTTPException(status_code=404, detail="Mídia não encontrada.")
     if "folder_id" in data.model_fields_set:
-        _validate_folder(db, data.folder_id)
+        _validate_folder(db, data.folder_id, scope)
     media = crud.update_media(db, media, data)
     await notify_all_screens(db, reason="media-updated")
     return media
+
+
+@router.post("/bulk-tags", response_model=schemas.BulkActionResult)
+async def bulk_tag_media(
+    data: schemas.BulkTagRequest,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> schemas.BulkActionResult:
+    """Adiciona tags a varias midias da empresa em foco."""
+    rows: list[models.Media] = []
+    for media_id in data.ids:
+        media = crud.get_media(db, media_id)
+        if media is not None and scope_can_access(scope, media.company_id):
+            rows.append(media)
+    updated = crud.bulk_tag_media(db, rows, data.tags)
+    if updated:
+        await notify_all_screens(db, reason="media-bulk-tagged")
+    return schemas.BulkActionResult(updated=updated, ids=[m.id for m in rows])
 
 
 @router.delete(
@@ -484,3 +523,100 @@ async def delete_media(
 
     crud.delete_media(db, media)
     await notify_all_screens(db, reason="media-deleted")
+
+
+@router.post(
+    "/import-url", response_model=schemas.MediaRead, status_code=status.HTTP_201_CREATED
+)
+async def import_media_from_url(
+    background_tasks: BackgroundTasks,
+    data: schemas.MediaUrlImport,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> models.Media:
+    """Baixa um arquivo (imagem/video/audio) de uma URL e registra a midia.
+
+    O download e feito no servidor, em blocos, respeitando o limite de
+    tamanho. O tipo e deduzido pela extensao da URL ou pelo content-type.
+    """
+    _validate_folder(db, data.folder_id, scope)
+    url = data.url.strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="A URL deve comecar com http:// ou https://.")
+    suffix = Path(urlparse(url).path).suffix.lower()
+    try:
+        resp = requests.get(
+            url, stream=True, timeout=30,
+            headers={"User-Agent": "tvMedia/1.0"},
+        )
+        resp.raise_for_status()
+    except Exception as exc:  # pragma: no cover - rede
+        raise HTTPException(status_code=400, detail=f"Falha ao baixar a URL: {exc}")
+    try:
+        ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if suffix not in (_IMAGE_EXTS | _VIDEO_EXTS | _AUDIO_EXTS):
+            suffix = _EXT_BY_MIME.get(ctype, "")
+        if suffix in _IMAGE_EXTS:
+            media_type = models.MediaType.image
+        elif suffix in _VIDEO_EXTS:
+            media_type = models.MediaType.video
+        elif suffix in _AUDIO_EXTS:
+            media_type = models.MediaType.audio
+        else:
+            raise HTTPException(status_code=400, detail="Tipo de arquivo nao suportado para download por URL.")
+        unique_name = f"{uuid.uuid4().hex}{suffix}"
+        destination = settings.media_dir / unique_name
+        max_bytes = settings.max_upload_bytes
+        written = 0
+        try:
+            with destination.open("wb") as buffer:
+                for chunk in resp.iter_content(_UPLOAD_CHUNK_SIZE):
+                    if not chunk:
+                        continue
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise HTTPException(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail=f"Arquivo excede o limite de {settings.max_upload_mb} MB.",
+                        )
+                    buffer.write(chunk)
+        except HTTPException:
+            destination.unlink(missing_ok=True)
+            raise
+    finally:
+        resp.close()
+    media = crud.create_media(
+        db,
+        name=data.name,
+        media_type=media_type,
+        path=unique_name,
+        tags=data.tags,
+        folder_id=data.folder_id,
+        company_id=scope.write_company_id,
+        expires_at=data.expires_at,
+    )
+    _schedule_processing(background_tasks, media)
+    await notify_all_screens(db, reason="media-url-imported")
+    return media
+
+
+@router.post("/purge-unused", response_model=schemas.PurgeResult)
+async def purge_unused_media(
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> schemas.PurgeResult:
+    """Remove midias nao usadas por nenhuma playlist nem como audio de fundo.
+
+    Apaga tambem os arquivos derivados (original, otimizado e poster).
+    """
+    unused = crud.list_unused_media(db, company_id=scope.company_id)
+    removed: list[int] = []
+    for media in unused:
+        for rel in (media.path, media.optimized_path, media.poster_path):
+            if rel:
+                (settings.media_dir / rel).unlink(missing_ok=True)
+        removed.append(media.id)
+        crud.delete_media(db, media)
+    if removed:
+        await notify_all_screens(db, reason="media-purged")
+    return schemas.PurgeResult(deleted=len(removed), ids=removed)

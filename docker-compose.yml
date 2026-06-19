@@ -23,14 +23,17 @@ services:
       - .env
     environment:
       APP_NAME: AdSignage
-      DEBUG: "false"
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-false}
       # Banco SQLite dentro do volume persistente.
       DATABASE_URL: sqlite:////app/data/adsignage.db
       MEDIA_DIR: /app/data/media
       # O frontend é montado dentro do container (veja volumes).
       FRONTEND_DIR: /app/frontend
       MAX_UPLOAD_MB: "200"
-      CORS_ORIGINS: "*"
+      # Restrinja em producao. Ex.: https://midia.suaempresa.com.br
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}
+      BACKUP_DIR: /app/data/backups
       # Perfil enxuto de execução.
       WEB_CONCURRENCY: "1"
       MALLOC_ARENA_MAX: "2"

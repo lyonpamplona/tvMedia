@@ -17,6 +17,9 @@ pré-visualização do painel use exatamente a mesma lógica do player.
 
 from __future__ import annotations
 
+import base64
+import binascii
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -27,7 +30,8 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
-from .. import crud, schemas, services
+from .. import crud, models, schemas, services
+from ..config import settings
 from ..database import SessionLocal, get_db
 from ..websocket_manager import manager
 
@@ -97,6 +101,53 @@ def report_events(
         company_id=screen.company_id,
     )
     return {"stored": stored}
+
+
+def _save_screenshot(slug: str, command_id: int, data_url: str | None) -> str | None:
+    """Salva screenshot enviado pelo player como PNG em /media/screenshots."""
+    if not data_url or "," not in data_url:
+        return None
+    header, raw = data_url.split(",", 1)
+    if "image/png" not in header and "image/jpeg" not in header:
+        return None
+    ext = ".jpg" if "image/jpeg" in header else ".png"
+    try:
+        data = base64.b64decode(raw, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    if len(data) > 8 * 1024 * 1024:
+        return None
+    out_dir = settings.media_dir / "screenshots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    name = f"{slug}-{command_id}{ext}"
+    (out_dir / name).write_bytes(data)
+    return f"screenshots/{name}"
+
+
+@router.post("/api/display/{slug}/commands/{command_id}/result", response_model=schemas.PlayerCommandRead)
+def report_command_result(
+    slug: str,
+    command_id: int,
+    data: schemas.PlayerCommandResult,
+    db: Session = Depends(get_db),
+) -> models.PlayerCommand:
+    """Recebe resultado de comando executado pelo player."""
+    screen = crud.get_screen_by_slug(db, slug)
+    if screen is None:
+        raise HTTPException(status_code=404, detail="Tela não encontrada.")
+    command = crud.get_player_command(db, command_id)
+    if command is None or command.screen_id != screen.id:
+        raise HTTPException(status_code=404, detail="Comando não encontrado.")
+    result_path = None
+    if command.command_type == "screenshot":
+        result_path = _save_screenshot(slug, command_id, data.data_url)
+    return crud.complete_player_command(
+        db,
+        command,
+        status=data.status,
+        result=data.result,
+        result_path=result_path,
+    )
 
 
 @router.websocket("/ws/display/{slug}")

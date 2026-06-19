@@ -28,6 +28,9 @@
       <label class="login-field"><span>Senha</span>
         <input type="password" id="login-password" placeholder="Senha do painel" autocomplete="current-password" required />
       </label>
+      <label class="login-field"><span>Codigo 2FA</span>
+        <input type="text" id="login-totp" placeholder="Se habilitado" inputmode="numeric" autocomplete="one-time-code" maxlength="8" />
+      </label>
       <button type="submit" class="btn primary block">Entrar</button>
       <p class="login-error" id="login-error"></p>
     </form>

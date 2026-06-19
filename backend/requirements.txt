@@ -6,6 +6,7 @@ pydantic==2.10.4
 python-dotenv==1.0.1
 python-multipart==0.0.20
 alembic==1.14.0
+requests==2.32.3
 # Opcional (recomendado): reescala/otimizacao de imagens no servidor.
 # Sem o Pillow, o processamento de imagem e ignorado com seguranca.
 Pillow>=10.0.0

@@ -1,0 +1,38 @@
+name: tvMedia CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Compile backend
+        run: python -m compileall -q backend/app
+
+      - name: Check frontend syntax
+        run: |
+          node --check frontend/admin/app.js
+          node --check frontend/player/player.js
+
+      - name: Run tests
+        run: python -m pytest

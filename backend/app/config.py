@@ -110,6 +110,19 @@ class Settings:
         self.secret_key: str = os.getenv("SECRET_KEY", DEFAULT_SECRET_KEY)
         self.token_ttl_hours: int = int(os.getenv("TOKEN_TTL_HOURS", "24"))
 
+        # P8: endurecimento de deploy atras de proxy/HTTPS.
+        self.force_https: bool = _env_bool("FORCE_HTTPS", False)
+        self.security_headers_enabled: bool = _env_bool(
+            "SECURITY_HEADERS_ENABLED", True
+        )
+        self.hsts_seconds: int = int(os.getenv("HSTS_SECONDS", "31536000"))
+        self.api_docs_enabled: bool = _env_bool("API_DOCS_ENABLED", True)
+        # SSO SAML permanece opcional: estas variaveis reservam a configuracao
+        # para uma integracao futura com IdP sem acoplar uma dependencia pesada.
+        self.sso_saml_enabled: bool = _env_bool("SSO_SAML_ENABLED", False)
+        self.sso_saml_metadata_url: str | None = os.getenv("SSO_SAML_METADATA_URL") or None
+        self.sso_saml_entity_id: str | None = os.getenv("SSO_SAML_ENTITY_ID") or None
+
         self.default_timezone: str = os.getenv(
             "DEFAULT_TIMEZONE", "America/Sao_Paulo"
         )
@@ -132,6 +145,38 @@ class Settings:
             os.getenv("BACKUP_INTERVAL_HOURS", "24")
         )
         self.backup_keep: int = int(os.getenv("BACKUP_KEEP", "7"))
+
+        # P4: alertas de tela offline. O monitor so envia alertas quando um
+        # webhook ou SMTP estiver configurado; caso contrario apenas registra.
+        self.offline_alert_enabled: bool = _env_bool("OFFLINE_ALERT_ENABLED", True)
+        self.offline_alert_after_minutes: int = int(
+            os.getenv("OFFLINE_ALERT_AFTER_MINUTES", "5")
+        )
+        self.offline_alert_repeat_minutes: int = int(
+            os.getenv("OFFLINE_ALERT_REPEAT_MINUTES", "60")
+        )
+        self.offline_alert_check_seconds: int = int(
+            os.getenv("OFFLINE_ALERT_CHECK_SECONDS", "60")
+        )
+        self.offline_alert_webhook_url: str | None = (
+            os.getenv("OFFLINE_ALERT_WEBHOOK_URL") or None
+        )
+        self.smtp_host: str | None = os.getenv("SMTP_HOST") or None
+        self.smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
+        self.smtp_username: str | None = os.getenv("SMTP_USERNAME") or None
+        self.smtp_password: str | None = os.getenv("SMTP_PASSWORD") or None
+        self.smtp_from: str | None = os.getenv("SMTP_FROM") or None
+        self.offline_alert_email_to: str | None = (
+            os.getenv("OFFLINE_ALERT_EMAIL_TO") or None
+        )
+
+        # P7: envio agendado de relatorios de proof-of-play por e-mail.
+        self.report_scheduler_enabled: bool = _env_bool(
+            "REPORT_SCHEDULER_ENABLED", True
+        )
+        self.report_scheduler_check_seconds: int = int(
+            os.getenv("REPORT_SCHEDULER_CHECK_SECONDS", "300")
+        )
 
         # Garante que os diretórios necessários existam.
         self.media_dir.mkdir(parents=True, exist_ok=True)
