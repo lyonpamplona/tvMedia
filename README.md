@@ -78,10 +78,6 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - [Configuracao e dependencias](docs/CONFIGURACAO.md)
 - [Tutorial de uso](docs/TUTORIAL_USO.md)
 - [Comandos operacionais](docs/COMANDOS.md)
-- [Auditoria do codigo](docs/AUDITORIA_CODIGO.md)
-- [Roadmap corretivo](docs/ROADMAP_CORRETIVO.md)
-- [Git e GitHub](docs/GIT_GITHUB.md)
-- [Pagina HTML de apresentacao](docs/APRESENTACAO.html)
 
 ## Verificacao
 
@@ -105,7 +101,3 @@ execucao dos testes.
 - Ative `FORCE_HTTPS=true` apenas quando o proxy/headers estiverem corretos.
 - Configure backup, SMTP e politica de retencao conforme o ambiente.
 
-## Licenca
-
-Nao ha arquivo de licenca publicado neste checkout. Antes de abrir o repositorio
-publicamente, defina a licenca desejada e inclua `LICENSE`.
