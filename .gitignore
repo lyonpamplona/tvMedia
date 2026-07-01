@@ -19,12 +19,6 @@ data/
 *.db-shm
 *.db-wal
 frontend/admin/icons/*.tmp
-/landing-clientes
-APRESENTACAO.html
-ROADMAP.md
-ROADMAP_CORRETIVO.md
-AUDITORIA_CODIGO.md
-RELATORIO_TECNICO.md
 
 # Node/editor/SO
 node_modules/
@@ -37,3 +31,7 @@ Thumbs.db
 *.log
 dist/
 build/
+landing-clientes/
+ROADMAP.md
+RELATORIO_TECNICO.md
+RELATORIO_LIVE_GRAPHICS_L1.md

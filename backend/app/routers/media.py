@@ -468,6 +468,84 @@ async def reprocess_media(
     return media
 
 
+# --------------------------------------------------------------------------- #
+# Cue points sincronizados ao video (L3)
+# --------------------------------------------------------------------------- #
+def _resolve_media_for_scope(db: Session, media_id: int, scope: Scope) -> models.Media:
+    """Carrega a midia garantindo que o escopo atual pode acessa-la."""
+    media = crud.get_media(db, media_id)
+    if media is None or not scope_can_access(scope, media.company_id):
+        raise HTTPException(status_code=404, detail="Midia nao encontrada.")
+    return media
+
+
+@router.get("/{media_id}/cues", response_model=list[schemas.MediaCueRead])
+def list_cues(
+    media_id: int,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> list[models.MediaCue]:
+    """Lista os cue points (disparos por tempo) de uma midia."""
+    _resolve_media_for_scope(db, media_id, scope)
+    return crud.list_media_cues(db, media_id)
+
+
+@router.post(
+    "/{media_id}/cues",
+    response_model=schemas.MediaCueRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_cue(
+    media_id: int,
+    data: schemas.MediaCueCreate,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> models.MediaCue:
+    """Cria um cue point para a midia (ex.: mostrar lower-third no segundo X)."""
+    media = _resolve_media_for_scope(db, media_id, scope)
+    cue = crud.create_media_cue(db, media, data)
+    await notify_all_screens(db, reason="cue-created")
+    return cue
+
+
+@router.patch("/{media_id}/cues/{cue_id}", response_model=schemas.MediaCueRead)
+async def update_cue(
+    media_id: int,
+    cue_id: int,
+    data: schemas.MediaCueUpdate,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> models.MediaCue:
+    """Atualiza parcialmente um cue point."""
+    _resolve_media_for_scope(db, media_id, scope)
+    cue = crud.get_media_cue(db, cue_id)
+    if cue is None or cue.media_id != media_id:
+        raise HTTPException(status_code=404, detail="Cue nao encontrado.")
+    cue = crud.update_media_cue(db, cue, data)
+    await notify_all_screens(db, reason="cue-updated")
+    return cue
+
+
+@router.delete(
+    "/{media_id}/cues/{cue_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
+async def delete_cue(
+    media_id: int,
+    cue_id: int,
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> None:
+    """Remove um cue point da midia."""
+    _resolve_media_for_scope(db, media_id, scope)
+    cue = crud.get_media_cue(db, cue_id)
+    if cue is None or cue.media_id != media_id:
+        raise HTTPException(status_code=404, detail="Cue nao encontrado.")
+    crud.delete_media_cue(db, cue)
+    await notify_all_screens(db, reason="cue-deleted")
+
+
 @router.patch("/{media_id}", response_model=schemas.MediaRead)
 async def update_media(
     media_id: int,

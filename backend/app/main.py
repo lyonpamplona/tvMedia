@@ -25,10 +25,11 @@ from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, alerts, backup, crud, reports
+from . import __version__, alerts, backup, crud, reports, retention
 from .config import settings
 from .database import SessionLocal, init_db
 from .routers import (
+    ad_breaks,
     analytics,
     audit,
     auth,
@@ -37,7 +38,9 @@ from .routers import (
     datasets,
     display,
     folders,
+    live,
     media,
+    metrics,
     overlays,
     playlists,
     schedules,
@@ -81,12 +84,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     backup_task: asyncio.Task | None = None
     alert_task: asyncio.Task | None = None
     report_task: asyncio.Task | None = None
+    retention_task: asyncio.Task | None = None
     if settings.backup_enabled:
         backup_task = asyncio.create_task(backup.backup_scheduler(stop_event))
     if settings.offline_alert_enabled:
         alert_task = asyncio.create_task(alerts.offline_alert_scheduler(stop_event))
     if settings.report_scheduler_enabled:
         report_task = asyncio.create_task(reports.report_scheduler(stop_event))
+    if settings.play_events_retention_days > 0:
+        retention_task = asyncio.create_task(
+            retention.retention_scheduler(stop_event)
+        )
 
     try:
         yield
@@ -108,6 +116,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             report_task.cancel()
             try:
                 await report_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+        if retention_task is not None:
+            retention_task.cancel()
+            try:
+                await retention_task
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
 
@@ -166,11 +180,14 @@ app.include_router(screens.router)
 app.include_router(system.router)
 app.include_router(zones.router)
 app.include_router(overlays.router)
+app.include_router(live.router)
 app.include_router(schedules.router)
 app.include_router(display.router)
 app.include_router(widgets.router)
 app.include_router(analytics.router)
 app.include_router(audit.router)
+app.include_router(metrics.router)
+app.include_router(ad_breaks.router)
 
 
 @app.get("/api/health", tags=["health"])

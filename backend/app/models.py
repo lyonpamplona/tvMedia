@@ -60,6 +60,9 @@ class MediaType(str, enum.Enum):
     countdown = "countdown"
     qrcode = "qrcode"
     rates = "rates"
+    # L2: gerador de caracteres (CG) - lower-third disparavel com
+    # titulo + subtitulo + logo + cor de destaque.
+    lowerthird = "lowerthird"
     live = "live"
     pdf = "pdf"
     webpage = "webpage"
@@ -287,6 +290,102 @@ class Media(Base):
     items: Mapped[list["PlaylistItem"]] = relationship(
         back_populates="media", cascade="all, delete-orphan"
     )
+    cues: Mapped[list["MediaCue"]] = relationship(
+        back_populates="media", cascade="all, delete-orphan"
+    )
+
+
+class MediaCue(Base):
+    """Cue point sincronizado ao tempo de um video (L3 / ad-break L5).
+
+    Cada cue dispara uma acao no ``player.js`` quando o video atinge
+    ``at_seconds`` (evento ``timeupdate``). As acoes suportadas sao:
+
+    * ``show_gfx``  -> mostra um grafico (lower-third/HUD) montado a partir de
+      ``content``/``kind``/``anchor`` na camada de GFX ao vivo.
+    * ``clear_gfx`` -> limpa o grafico do ``slot_id`` (ou todos).
+    * ``ad_break``  -> exibe, em tela cheia, a midia de anuncio referenciada por
+      ``target_id`` durante ``duration`` segundos (registra proof-of-play com
+      ``is_ad=True``).
+
+    Os cues sao resolvidos no payload do item pelo ``build_cues_payload`` e
+    enviados ao player junto da playlist.
+    """
+
+    __tablename__ = "media_cues"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    media_id: Mapped[int] = mapped_column(
+        ForeignKey("media.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Instante do video (segundos) em que o cue dispara.
+    at_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    # Acao: show_gfx | clear_gfx | ad_break (compativel com show_overlay).
+    action: Mapped[str] = mapped_column(String(16), nullable=False, default="show_gfx")
+    # Tipo do grafico (lowerthird, etc.) ou "image"/"video" no caso de ad_break.
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="lowerthird")
+    # Conteudo serializado (JSON) com titulo/subtitulo/cor do grafico.
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Alvo opcional: id de overlay/midia (ex.: midia do anuncio no ad_break).
+    target_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Identificador do slot de GFX (permite limpar um grafico especifico).
+    slot_id: Mapped[str] = mapped_column(String(32), nullable=False, default="cue")
+    # Posicionamento por ancora (lower_third, top_left, fullscreen, ...).
+    anchor: Mapped[str] = mapped_column(String(16), nullable=False, default="lower_third")
+    enter_anim: Mapped[str] = mapped_column(String(8), nullable=False, default="slide")
+    exit_anim: Mapped[str] = mapped_column(String(8), nullable=False, default="fade")
+    # Duracao do grafico em segundos (0 = permanece ate um clear).
+    duration: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    media: Mapped["Media"] = relationship(back_populates="cues")
+
+
+class AdBreakSchedule(Base):
+    """Ad-break recorrente/agendado por relogio de parede (L6).
+
+    Diferente do ad-break por cue (preso ao ``at_seconds`` de um video), este
+    dispara em intervalos de relogio (``every_minutes``), dentro de uma janela
+    diaria (``start_time``/``end_time``) e em dias da semana selecionados
+    (``days``). O player resolve o disparo de forma deterministica (alinhado ao
+    minuto) e interrompe a reproducao mostrando o anuncio em tela cheia,
+    pausando o video de fundo durante ``duration_seconds`` e retomando em
+    seguida. Por isso nao conflita com playlists: ele as sobrepoe
+    temporariamente e devolve o controle ao terminar.
+    """
+
+    __tablename__ = "ad_break_schedules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, default="Ad-break")
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # Tela alvo; NULL = todas as telas da empresa.
+    screen_id: Mapped[int | None] = mapped_column(
+        ForeignKey("screens.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # Midia do anuncio (imagem/video) exibida em tela cheia.
+    media_id: Mapped[int | None] = mapped_column(
+        ForeignKey("media.id", ondelete="SET NULL"), nullable=True
+    )
+    # Cadencia em minutos (ex.: 15 = a cada 15 min, alinhado ao relogio).
+    every_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=15)
+    duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=15)
+    # Janela diaria de atividade no formato "HH:MM".
+    start_time: Mapped[str] = mapped_column(String(5), nullable=False, default="00:00")
+    end_time: Mapped[str] = mapped_column(String(5), nullable=False, default="23:59")
+    # Dias da semana ativos (0=segunda ... 6=domingo), digitos concatenados.
+    days: Mapped[str] = mapped_column(String(16), nullable=False, default="0123456")
+    enter_anim: Mapped[str] = mapped_column(String(8), nullable=False, default="fade")
+    exit_anim: Mapped[str] = mapped_column(String(8), nullable=False, default="fade")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class Playlist(Base):
@@ -418,6 +517,16 @@ class Screen(Base):
     theme_accent: Mapped[str | None] = mapped_column(String(16), nullable=True)
     theme_ticker_bg: Mapped[str | None] = mapped_column(String(16), nullable=True)
     theme_ticker_text: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # P0+: fonte da tela (aplicada como CSS var --tv-font no player).
+    theme_font: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Fundo da tela: "color" (usa theme_bg), "image" (background_image_id) ou
+    # "transparent" (sem fundo, util para captura/overlay externo).
+    background_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="color")
+    background_image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("media.id", ondelete="SET NULL"), nullable=True
+    )
+    # Ajuste da imagem de fundo: cover/contain/fill/tile.
+    background_fit: Mapped[str] = mapped_column(String(8), nullable=False, default="cover")
 
     zones: Mapped[list["Zone"]] = relationship(
         back_populates="screen",
@@ -432,7 +541,25 @@ class Screen(Base):
 
 
 class Overlay(Base):
-    """Widget sobreposto (HUD) exibido por cima das zonas de uma tela (P0)."""
+    """Widget sobreposto (HUD) exibido por cima das zonas de uma tela (P0/L1).
+
+    Um overlay reaproveita os widgets do player (relogio, clima, ticker, texto,
+    etc.) e os posiciona por cima do conteudo. A partir da fase L1 (Live
+    Graphics) ele ganha recursos de transmissao ao vivo:
+
+    * Posicionamento por ancora (``anchor``) com nomes de broadcast como
+      ``lower_third`` (terco inferior) e ``fullscreen`` (tela cheia), alem das
+      nove posicoes classicas. Quando vazio, cai no campo legado ``position``.
+    * ``margin`` define a margem de area segura (em vmin) ate as bordas.
+    * ``enter_anim``/``exit_anim`` controlam a animacao de entrada/saida
+      (``none``/``fade``/``slide``/``wipe``).
+    * Janela de tempo para o modo ``timed``: ``enter_at`` (atraso inicial, em
+      segundos), ``duration`` (tempo visivel; 0 = usa ``visible_seconds``) e
+      ``repeat_every`` (ciclo de reaparicao; 0 = usa ``interval_seconds``).
+
+    Os campos legados (``position``, ``interval_seconds``, ``visible_seconds``)
+    sao mantidos para retrocompatibilidade: payloads antigos continuam validos.
+    """
 
     __tablename__ = "overlays"
 
@@ -457,6 +584,22 @@ class Overlay(Base):
     opacity: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     z_index: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # --- L1: Live Graphics (posicionamento, animacao e janela de tempo) --- #
+    # Ancora de posicionamento (broadcast). Vazio => usa o campo `position`.
+    # Valores: top_left/top/top_right/left/center/right/bottom_left/bottom/
+    # bottom_right/lower_third/fullscreen.
+    anchor: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    # Margem de area segura em vmin (afasta o overlay das bordas da tela).
+    margin: Mapped[float] = mapped_column(Float, nullable=False, default=2.0)
+    # Animacao de entrada/saida: none/fade/slide/wipe.
+    enter_anim: Mapped[str] = mapped_column(String(8), nullable=False, default="fade")
+    exit_anim: Mapped[str] = mapped_column(String(8), nullable=False, default="fade")
+    # Janela de tempo (modo "timed"): atraso inicial antes da 1a exibicao.
+    enter_at: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    # Tempo visivel por ciclo (0 = usa visible_seconds, legado).
+    duration: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    # Intervalo de reaparicao (0 = usa interval_seconds, legado).
+    repeat_every: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -552,6 +695,15 @@ class Zone(Base):
     default_playlist_id: Mapped[int | None] = mapped_column(
         ForeignKey("playlists.id", ondelete="SET NULL"), nullable=True
     )
+    # P0+: customizacao visual da zona. bg_color="transparent" deixa ver o
+    # fundo da tela atras da zona; nulo = preto (#000), comportamento legado.
+    bg_color: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    opacity: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    radius: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    padding: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    border_width: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    border_color: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    font_family: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     screen: Mapped["Screen"] = relationship(back_populates="zones")
     default_playlist: Mapped["Playlist | None"] = relationship()
@@ -617,6 +769,9 @@ class Campaign(Base):
     start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # L5: peso para rotacao ponderada entre campanhas de mesma prioridade.
+    # Quanto maior o peso, mais a campanha aparece no rodizio (0 = nunca sozinha).
+    weight: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     max_plays_per_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
     company_id: Mapped[int | None] = mapped_column(
@@ -703,6 +858,8 @@ class PlayEvent(Base):
     media_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     media_type: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # L5: marca eventos de anuncio (ad-break) para o relatorio de exibicao.
+    is_ad: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     played_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

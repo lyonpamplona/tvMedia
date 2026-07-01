@@ -148,6 +148,7 @@
         media_name: item.name || "",
         media_type: item.type || "",
         duration_seconds: Math.round(item.duration || 0),
+        is_ad: item.is_ad === true, // L5: marca exibicao de anuncio (ad-break)
       });
       if (this.queue.length >= 50) this.flush();
     },
@@ -306,6 +307,26 @@
     built.wrap.classList.add("widget-promo");
     built.render(items);
     return built.wrap;
+  }
+
+  /**
+   * L2: Gerador de caracteres (CG) / lower-third. Renderiza um cartao com
+   * faixa de destaque, titulo, subtitulo e logo opcional. Reaproveitado tanto
+   * como item de playlist (type "lowerthird") quanto no disparo ao vivo (L4).
+   * @param {Object} cfg { title, subtitle, logo, color, align }
+   */
+  function buildLowerThirdWidget(cfg) {
+    const wrap = document.createElement("div");
+    wrap.className = "widget widget-lowerthird lt-align-" + ((cfg.align === "right") ? "right" : "left");
+    if (cfg.color) wrap.style.setProperty("--lt-accent", cfg.color);
+    const logo = cfg.logo ? '<div class="lt-logo"><img src="' + escapeText(cfg.logo) + '" alt=""/></div>' : "";
+    const sub = cfg.subtitle ? '<div class="lt-sub">' + escapeText(cfg.subtitle) + '</div>' : "";
+    wrap.innerHTML = logo +
+      '<div class="lt-bar">' +
+        '<div class="lt-accent"></div>' +
+        '<div class="lt-text"><div class="lt-title">' + escapeText(cfg.title || "") + '</div>' + sub + '</div>' +
+      '</div>';
+    return wrap;
   }
 
   // ---- v34: widgets contagem regressiva, QR e cotacoes ---- //
@@ -613,6 +634,7 @@
         video.playsInline = true;
         video.controls = false;
         video.addEventListener("ended", onVideoEnded);
+        attachVideoCues(video, item.cues); // L3: disparos por tempo de video
         return video;
       }
       case "audio": {
@@ -670,6 +692,8 @@
         return buildQrWidget(parseConfig(item));
       case "rates":
         return buildRatesWidget(parseConfig(item));
+      case "lowerthird":
+        return buildLowerThirdWidget(parseConfig(item));
       case "worldclock":
         return buildWorldClockWidget(parseConfig(item));
       case "calendar":
@@ -742,6 +766,13 @@
       this.el.style.width = `${zone.width}%`;
       this.el.style.height = `${zone.height}%`;
       this.el.style.zIndex = String(zone.z_index || 0);
+      // Customizacao visual da zona (fundo/opacidade/borda/cantos/fonte).
+      this.el.style.background = (zone.bg_color != null && zone.bg_color !== "") ? zone.bg_color : "#000";
+      if (zone.opacity != null && zone.opacity !== 1) this.el.style.opacity = String(zone.opacity);
+      if (zone.radius) this.el.style.borderRadius = zone.radius + "cqmin";
+      if (zone.padding) this.el.style.padding = zone.padding + "cqmin";
+      if (zone.border_width) this.el.style.border = zone.border_width + "px solid " + (zone.border_color || "#fff");
+      if (zone.font_family) this.el.style.setProperty("--tv-font", zone.font_family);
     }
 
     /** Inicia a reprodução do primeiro item da zona. */
@@ -849,7 +880,44 @@
     set("--tv-accent", theme.accent);
     set("--tv-ticker-bg", theme.tickerBg);
     set("--tv-ticker-text", theme.tickerText);
+    set("--tv-font", theme.font);
     set("--tv-slide-bg", theme.bg ? `radial-gradient(circle at 50% 30%, ${theme.bg}, #000)` : null);
+  }
+
+  /**
+   * Aplica o fundo da tela: cor (via tema), imagem (midia) ou transparente.
+   * @param {Object|null} bg
+   */
+  function applyBackground(bg) {
+    bg = bg || {};
+    const root = document.documentElement.style;
+    stage.style.backgroundImage = "";
+    stage.style.backgroundColor = "";
+    stage.style.backgroundSize = "";
+    stage.style.backgroundRepeat = "";
+    stage.style.backgroundPosition = "";
+    stage.style.background = "";
+    document.body.style.background = "";
+    if (bg.mode === "transparent") {
+      root.setProperty("--tv-bg", "transparent");
+      stage.style.background = "transparent";
+      document.body.style.background = "transparent";
+      return;
+    }
+    if (bg.mode === "image" && bg.image) {
+      const fit = bg.fit || "cover";
+      stage.style.backgroundImage = 'url("' + bg.image + '")';
+      stage.style.backgroundPosition = "center center";
+      if (fit === "tile") {
+        stage.style.backgroundRepeat = "repeat";
+        stage.style.backgroundSize = "auto";
+      } else {
+        stage.style.backgroundRepeat = "no-repeat";
+        stage.style.backgroundSize = fit === "fill" ? "100% 100%" : fit;
+      }
+      return;
+    }
+    // modo "color": usa a variavel --tv-bg definida pelo tema.
   }
 
   /** Remove todos os overlays e cancela seus timers. */
@@ -859,14 +927,32 @@
     if (overlayRoot) overlayRoot.innerHTML = "";
   }
 
-  /** Define um tamanho padrao para o overlay conforme a posicao. */
-  function applyDefaultOverlaySize(box, position, width, height) {
+  /**
+   * Normaliza o nome da ancora aceitando tanto os nomes de broadcast com
+   * underscore (`top_left`, `lower_third`) quanto o formato legado com hifen
+   * (`top-left`). Retorna sempre o formato com hifen usado pelas classes CSS.
+   * @param {string} anchor
+   * @returns {string}
+   */
+  function normalizeAnchor(anchor) {
+    return String(anchor || "bottom").trim().replace(/_/g, "-").toLowerCase();
+  }
+
+  /** Define um tamanho padrao para o overlay conforme a ancora. */
+  function applyDefaultOverlaySize(box, anchor, width, height) {
     const w = width > 0 ? `${width}vw` : null;
     const hh = height > 0 ? `${height}vh` : null;
-    if (position === "bottom" || position === "top") {
+    if (anchor === "fullscreen") {
+      box.style.width = w || "100%";
+      box.style.height = hh || "100%";
+    } else if (anchor === "lower-third") {
+      // Terco inferior classico de transmissao (faixa baixa, larga).
+      box.style.width = w || "100%";
+      box.style.height = hh || "26vmin";
+    } else if (anchor === "bottom" || anchor === "top") {
       box.style.width = w || "100%";
       box.style.height = hh || "14vmin";
-    } else if (position === "left" || position === "right") {
+    } else if (anchor === "left" || anchor === "right") {
       box.style.width = w || "24vmin";
       box.style.height = hh || "60vmin";
     } else {
@@ -883,9 +969,19 @@
     clearOverlays();
     if (!overlayRoot) return;
     (list || []).forEach((ov) => {
+      // L1: a ancora tem prioridade sobre o campo legado `position`.
+      const anchor = normalizeAnchor(ov.anchor || ov.position || "bottom");
+      const enterAnim = ov.enter_anim || "fade";
+      const exitAnim = ov.exit_anim || "fade";
       const box = document.createElement("div");
-      box.className = "ov ov-pos-" + (ov.position || "bottom") + (ov.mode === "timed" ? " timed" : "");
-      applyDefaultOverlaySize(box, ov.position || "bottom", ov.width || 0, ov.height || 0);
+      box.className = "ov ov-pos-" + anchor + (ov.mode === "timed" ? " timed" : "");
+      // Classes de animacao de entrada/saida (CSS no index.html).
+      if (enterAnim && enterAnim !== "none") box.classList.add("ov-enter-" + enterAnim);
+      if (exitAnim && exitAnim !== "none") box.classList.add("ov-exit-" + exitAnim);
+      applyDefaultOverlaySize(box, anchor, ov.width || 0, ov.height || 0);
+      // Margem de area segura (afasta das bordas), exceto em tela cheia.
+      const margin = (ov.margin != null ? ov.margin : 2);
+      if (anchor !== "fullscreen" && margin > 0) box.style.setProperty("--ov-margin", margin + "vmin");
       box.style.zIndex = String(ov.z_index || 50);
       const inner = document.createElement("div");
       inner.className = "ov-inner";
@@ -894,18 +990,29 @@
       box.appendChild(inner);
       overlayRoot.appendChild(box);
       if (ov.mode === "timed") {
-        const showMs = Math.max(1, ov.visible_seconds || 15) * 1000;
-        const everyMs = Math.max((ov.interval_seconds || 300), Math.ceil(showMs / 1000) + 1) * 1000;
+        // Janela de tempo L1: enter_at (atraso inicial), duration (tempo
+        // visivel; fallback visible_seconds) e repeat_every (ciclo; fallback
+        // interval_seconds). Campos zerados caem no comportamento legado.
+        const enterAtMs = Math.max(0, Number(ov.enter_at) || 0) * 1000;
+        const showSecs = Number(ov.duration) > 0 ? Number(ov.duration) : (ov.visible_seconds || 15);
+        const showMs = Math.max(1, showSecs) * 1000;
+        const cycleSecs = Number(ov.repeat_every) > 0 ? Number(ov.repeat_every) : (ov.interval_seconds || 300);
+        const everyMs = Math.max(cycleSecs, Math.ceil(showMs / 1000) + 1) * 1000;
         const cycle = () => {
           box.classList.add("show");
           setTimeout(() => { if (box.isConnected) box.classList.remove("show"); }, showMs);
         };
-        cycle();
-        const id = setInterval(() => {
-          if (!box.isConnected) { clearInterval(id); return; }
+        // Primeira aparicao respeita enter_at; depois repete em ciclos.
+        const startTimer = setTimeout(() => {
+          if (!box.isConnected) return;
           cycle();
-        }, everyMs);
-        overlayTimers.push(id);
+          const id = setInterval(() => {
+            if (!box.isConnected) { clearInterval(id); return; }
+            cycle();
+          }, everyMs);
+          overlayTimers.push(id);
+        }, enterAtMs);
+        overlayTimers.push(startTimer);
       }
     });
   }
@@ -931,6 +1038,7 @@
     zoneControllers = [];
     stage.innerHTML = "";
     applyTheme(payload.theme);
+    applyBackground(payload.background);
     renderOverlays(payload.overlays || []);
     precachePayload(payload);
 
@@ -950,6 +1058,26 @@
     });
   }
 
+  // Indicador de conexao: mostra um aviso discreto enquanto o player nao
+  // consegue falar com o servidor (o conteudo em cache continua tocando).
+  let offlineBadge = null;
+  let offlineSince = 0;
+  function setConnection(ok) {
+    if (ok) {
+      offlineSince = 0;
+      if (offlineBadge) { offlineBadge.remove(); offlineBadge = null; }
+      return;
+    }
+    if (!offlineSince) offlineSince = Date.now();
+    if (!offlineBadge) {
+      offlineBadge = document.createElement("div");
+      offlineBadge.style.cssText = "position:fixed;left:2vmin;bottom:2vmin;z-index:99998;background:rgba(176,42,42,.92);color:#fff;font:600 2.4vmin system-ui;padding:1vmin 1.8vmin;border-radius:1vmin;pointer-events:none";
+      document.body.appendChild(offlineBadge);
+    }
+    const secs = Math.round((Date.now() - offlineSince) / 1000);
+    offlineBadge.textContent = "Reconectando\u2026 (" + secs + "s)";
+  }
+
   /**
    * Busca o payload de exibição e reinicia a reprodução se a revisão mudou.
    * @param {boolean} [force=false] Força o re-render mesmo sem mudança.
@@ -964,12 +1092,16 @@
       }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const payload = await resp.json();
+      setConnection(true);
+      adBreaks = Array.isArray(payload.ad_breaks) ? payload.ad_breaks : [];
+      startAdBreakScheduler();
       updateBackgroundAudio(payload.background_audio || null);
       if (force || payload.revision !== currentRevision) {
         currentRevision = payload.revision;
         render(payload);
       }
     } catch (err) {
+      setConnection(false);
       console.error("Falha ao buscar conteúdo:", err);
     }
   }
@@ -1021,6 +1153,278 @@
     }
   }
 
+  // ---------------------------------------------------------------------- //
+  // L4: Mesa de transmissao - graficos ao vivo aplicados sem recarregar a
+  // playlist. Vivem em uma camada propria (#live-layer), acima dos overlays.
+  // ---------------------------------------------------------------------- //
+  /** Camada de GFX ao vivo. @type {HTMLElement|null} */
+  let liveRoot = null;
+  /** Mapa slot_id -> {box, timer} dos graficos ao vivo ativos. */
+  const liveSlots = new Map();
+  let liveSeq = 0;
+
+  /** Garante (criando se preciso) a camada fixa de GFX ao vivo. */
+  function ensureLiveRoot() {
+    if (liveRoot && liveRoot.isConnected) return liveRoot;
+    liveRoot = document.getElementById("live-layer");
+    if (!liveRoot) {
+      liveRoot = document.createElement("div");
+      liveRoot.id = "live-layer";
+      document.body.appendChild(liveRoot);
+    }
+    return liveRoot;
+  }
+
+  /** Remove um box com animacao de saida e limpa seu timer. */
+  function removeLiveBox(slotId) {
+    const entry = liveSlots.get(slotId);
+    if (!entry) return;
+    liveSlots.delete(slotId);
+    if (entry.timer) clearTimeout(entry.timer);
+    const box = entry.box;
+    if (!box || !box.isConnected) return;
+    box.classList.remove("show");
+    setTimeout(() => { if (box.isConnected) box.remove(); }, 650);
+  }
+
+  /**
+   * Exibe um grafico ao vivo (lower-third/banner/HUD).
+   * @param {Object} spec Payload de schemas.LiveGfxTrigger.
+   */
+  function showLiveGfx(spec) {
+    const root = ensureLiveRoot();
+    const slotId = spec.slot_id || ("gfx-" + (++liveSeq));
+    removeLiveBox(slotId); // substitui um grafico do mesmo slot, se houver
+    const anchor = normalizeAnchor(spec.anchor || "lower_third");
+    const enterAnim = spec.enter_anim || "slide";
+    const exitAnim = spec.exit_anim || "fade";
+    const box = document.createElement("div");
+    box.className = "ov ov-pos-" + anchor + " timed";
+    if (enterAnim && enterAnim !== "none") box.classList.add("ov-enter-" + enterAnim);
+    if (exitAnim && exitAnim !== "none") box.classList.add("ov-exit-" + exitAnim);
+    applyDefaultOverlaySize(box, anchor, spec.width || 0, spec.height || 0);
+    const margin = (spec.margin != null ? spec.margin : 2);
+    if (anchor !== "fullscreen" && margin > 0) box.style.setProperty("--ov-margin", margin + "vmin");
+    box.style.zIndex = String(spec.z_index || 9500);
+    const inner = document.createElement("div");
+    inner.className = "ov-inner";
+    if (spec.opacity != null) inner.style.opacity = String(spec.opacity);
+    inner.appendChild(createMediaElement({ type: spec.kind || "text", content: spec.content || "", url: spec.url || "", poster: spec.poster || "", name: spec.name || "", muted: true, fit: spec.fit || "contain" }, () => {}));
+    box.appendChild(inner);
+    root.appendChild(box);
+    // Dispara a animacao de entrada no proximo frame.
+    requestAnimationFrame(() => { if (box.isConnected) box.classList.add("show"); });
+    const entry = { box: box, timer: null };
+    const dur = Number(spec.duration) || 0;
+    if (dur > 0) entry.timer = setTimeout(() => removeLiveBox(slotId), dur * 1000);
+    liveSlots.set(slotId, entry);
+  }
+
+  /**
+   * Limpa graficos ao vivo: um slot especifico ou todos.
+   * @param {string=} slotId
+   */
+  function clearLiveGfx(slotId) {
+    if (slotId) { removeLiveBox(slotId); return; }
+    Array.from(liveSlots.keys()).forEach((key) => removeLiveBox(key));
+  }
+
+  /**
+   * L3: liga os cue points de um video ao seu tempo de reproducao. A cada
+   * "timeupdate" verifica os cues ainda nao disparados e, ao cruzar
+   * "at_seconds", executa a acao reaproveitando a engine de GFX ao vivo (L4):
+   * mostra/limpa um lower-third na camada #live-layer. Os cues sao relativos
+   * ao proprio video, entao tocam igual em qualquer tela, sem depender de rede.
+   * @param {HTMLMediaElement} video Elemento de video.
+   * @param {Array<Object>} cues Lista de schemas.DisplayCue.
+   */
+  // --- L6: ad-breaks recorrentes/agendados (disparo por relogio) --- //
+  let adBreaks = [];
+  let adFiredKeys = new Set();
+  let adSchedulerStarted = false;
+  function parseHM(s, dflt) {
+    if (!s || !/^\d{1,2}:\d{2}$/.test(s)) return dflt;
+    const parts = s.split(":");
+    return (Number(parts[0]) || 0) * 60 + (Number(parts[1]) || 0);
+  }
+  function fireScheduledAdBreak(ab, idx) {
+    const slotId = "sched-ad-" + idx;
+    const dur = Number(ab.duration_seconds) || 0;
+    showLiveGfx({
+      slot_id: slotId,
+      kind: ab.kind || "image",
+      url: ab.url || "",
+      poster: ab.poster || "",
+      anchor: "fullscreen",
+      enter_anim: ab.enter_anim || "fade",
+      exit_anim: ab.exit_anim || "fade",
+      duration: dur,
+      fit: "contain",
+      name: ab.name || "anuncio",
+    });
+    try {
+      playReporter.register({ id: null }, {
+        media_id: ab.media_id == null ? null : ab.media_id,
+        name: ab.name || "Anuncio agendado",
+        type: ab.kind || "image",
+        duration: dur,
+        is_ad: true,
+      });
+    } catch (e) { /* registro best-effort */ }
+    // Pausa todos os videos de fundo durante o anuncio e retoma ao final.
+    try {
+      const paused = [];
+      document.querySelectorAll("video").forEach((v) => { if (!v.paused) { try { v.pause(); paused.push(v); } catch (e) {} } });
+      if (dur > 0) setTimeout(() => { paused.forEach((v) => { try { const p = v.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }); }, dur * 1000);
+    } catch (e) { /* pausa best-effort */ }
+  }
+  function startAdBreakScheduler() {
+    if (adSchedulerStarted) return;
+    adSchedulerStarted = true;
+    setInterval(() => {
+      if (!adBreaks.length) return;
+      const now = new Date();
+      const mins = now.getHours() * 60 + now.getMinutes();
+      const dow = (now.getDay() + 6) % 7; // JS domingo=0 -> segunda=0..domingo=6
+      const stamp = "" + now.getFullYear() + (now.getMonth() + 1) + now.getDate() + now.getHours() + now.getMinutes();
+      adBreaks.forEach((ab, idx) => {
+        const every = Number(ab.every_minutes) || 0;
+        if (every <= 0 || mins % every !== 0) return;
+        if (mins < parseHM(ab.start_time, 0) || mins > parseHM(ab.end_time, 1439)) return;
+        if ((ab.days || "0123456").indexOf(String(dow)) === -1) return;
+        const key = idx + "|" + stamp;
+        if (adFiredKeys.has(key)) return;
+        adFiredKeys.add(key);
+        fireScheduledAdBreak(ab, idx);
+      });
+      if (adFiredKeys.size > 500) adFiredKeys = new Set();
+    }, 1000);
+  }
+
+  function attachVideoCues(video, cues) {
+    if (!Array.isArray(cues) || !cues.length) return;
+    const list = cues.slice().sort((a, b) => (a.at_seconds || 0) - (b.at_seconds || 0));
+    const fired = new Set();
+    const slots = new Set();
+    let lastT = 0;
+    function fire(cue, idx) {
+      const action = cue.action || "show_gfx";
+      if (action === "clear_gfx") {
+        if (cue.slot_id) { clearLiveGfx(cue.slot_id); slots.delete(cue.slot_id); }
+        else { slots.forEach((s) => clearLiveGfx(s)); slots.clear(); }
+        return;
+      }
+      if (action === "ad_break") {
+        // L5: ad-break por tempo. Mostra o anuncio em tela cheia reaproveitando
+        // a camada de GFX ao vivo e registra um evento de proof-of-play (is_ad).
+        const slotId = cue.slot_id || ("ad-" + idx);
+        slots.add(slotId);
+        showLiveGfx({
+          slot_id: slotId,
+          kind: cue.kind || "image",
+          url: cue.url || "",
+          poster: cue.poster || "",
+          content: cue.content || "",
+          anchor: cue.anchor || "fullscreen",
+          enter_anim: cue.enter_anim || "fade",
+          exit_anim: cue.exit_anim || "fade",
+          duration: Number(cue.duration) || 0,
+          fit: "contain",
+          name: "anuncio",
+        });
+        playReporter.register({ id: cue.zone_id == null ? null : cue.zone_id }, {
+          media_id: cue.target_id == null ? null : cue.target_id,
+          name: "Anuncio #" + (cue.target_id || ""),
+          type: cue.kind || "image",
+          duration: Number(cue.duration) || 0,
+          is_ad: true,
+        });
+        // Pausa o video de fundo durante o anuncio e retoma ao final, para o
+        // conteudo principal nao correr "por baixo" do ad-break em tela cheia.
+        try {
+          const adDur = Number(cue.duration) || 0;
+          if (video && !video.paused) {
+            video.pause();
+            if (adDur > 0) {
+              setTimeout(() => { try { const p = video.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }, adDur * 1000);
+            }
+          }
+        } catch (e) { /* pausa best-effort */ }
+        return;
+      }
+      // show_gfx (e fallback): exibe um GFX/lower-third no slot do cue.
+      const slotId = cue.slot_id || ("cue-" + idx);
+      slots.add(slotId);
+      showLiveGfx({
+        slot_id: slotId,
+        kind: cue.kind || "lowerthird",
+        content: cue.content || "",
+        anchor: cue.anchor || "lower_third",
+        enter_anim: cue.enter_anim || "slide",
+        exit_anim: cue.exit_anim || "fade",
+        duration: Number(cue.duration) || 0,
+        name: "cue",
+      });
+    }
+    function onTime() {
+      const t = video.currentTime || 0;
+      if (t + 0.05 < lastT) fired.clear(); // voltou ao inicio (loop/seek)
+      lastT = t;
+      list.forEach((cue, idx) => {
+        if (fired.has(idx)) return;
+        if (t >= (cue.at_seconds || 0)) { fired.add(idx); fire(cue, idx); }
+      });
+    }
+    function cleanup() {
+      slots.forEach((s) => clearLiveGfx(s));
+      slots.clear();
+    }
+    video.addEventListener("timeupdate", onTime);
+    video.addEventListener("ended", cleanup);
+    video.addEventListener("emptied", cleanup);
+  }
+
+  /**
+   * Exibe uma tomada de tela (full-screen) com mensagem destacada.
+   * @param {Object} spec Payload de schemas.LiveTakeover.
+   */
+  function showTakeover(spec) {
+    const root = ensureLiveRoot();
+    clearTakeover();
+    const enterAnim = spec.enter_anim || "fade";
+    const exitAnim = spec.exit_anim || "fade";
+    const box = document.createElement("div");
+    box.className = "ov ov-pos-fullscreen timed ov-takeover";
+    if (enterAnim && enterAnim !== "none") box.classList.add("ov-enter-" + enterAnim);
+    if (exitAnim && exitAnim !== "none") box.classList.add("ov-exit-" + exitAnim);
+    box.style.zIndex = "9900";
+    const inner = document.createElement("div");
+    inner.className = "ov-inner takeover-card";
+    if (spec.color) inner.style.background = spec.color;
+    const h = document.createElement("div");
+    h.className = "takeover-title";
+    h.textContent = spec.title || "";
+    inner.appendChild(h);
+    if (spec.subtitle) {
+      const s = document.createElement("div");
+      s.className = "takeover-sub";
+      s.textContent = spec.subtitle;
+      inner.appendChild(s);
+    }
+    box.appendChild(inner);
+    root.appendChild(box);
+    requestAnimationFrame(() => { if (box.isConnected) box.classList.add("show"); });
+    const entry = { box: box, timer: null };
+    const dur = Number(spec.duration) || 0;
+    if (dur > 0) entry.timer = setTimeout(() => removeLiveBox("__takeover__"), dur * 1000);
+    liveSlots.set("__takeover__", entry);
+  }
+
+  /** Encerra a tomada de tela em exibicao. */
+  function clearTakeover() {
+    removeLiveBox("__takeover__");
+  }
+
   async function handleCommand(data) {
     const id = data.command_id;
     const command = data.command;
@@ -1039,6 +1443,18 @@
         } catch (err) {
           await reportCommandResult(id, { status: "failed", result: "Screenshot indisponivel neste navegador: " + (err && err.message ? err.message : String(err)) });
         }
+      } else if (command === "live_gfx") {
+        showLiveGfx(data.payload || {});
+        await reportCommandResult(id, { status: "done", result: "Grafico ao vivo exibido." });
+      } else if (command === "live_clear") {
+        clearLiveGfx((data.payload || {}).slot_id);
+        await reportCommandResult(id, { status: "done", result: "Grafico(s) ao vivo removido(s)." });
+      } else if (command === "takeover") {
+        showTakeover(data.payload || {});
+        await reportCommandResult(id, { status: "done", result: "Tomada de tela exibida." });
+      } else if (command === "takeover_clear") {
+        clearTakeover();
+        await reportCommandResult(id, { status: "done", result: "Tomada de tela encerrada." });
       } else {
         await reportCommandResult(id, { status: "unsupported", result: "Comando requer hardware/agente externo: " + command });
       }

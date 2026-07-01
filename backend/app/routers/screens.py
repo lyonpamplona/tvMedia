@@ -304,6 +304,10 @@ async def import_layout(
         "theme_accent",
         "theme_ticker_bg",
         "theme_ticker_text",
+        "theme_font",
+        "background_mode",
+        "background_image_id",
+        "background_fit",
     ):
         if field in data.model_fields_set:
             setattr(screen, field, getattr(data, field))

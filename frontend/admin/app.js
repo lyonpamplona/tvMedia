@@ -59,9 +59,9 @@
     tag: S('<path d="M3 3h8l10 10-8 8L3 11z"/><circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" stroke="none"/>'),
   };
 
-  const TYPE_ICON = { image: "image", video: "video", text: "text", html: "code", url: "link", youtube: "youtube", embed: "music", audio: "music", clock: "clock", weather: "sun", news: "text", promo: "tag", countdown: "clock", qrcode: "layout", rates: "tag", live: "video", pdf: "code", webpage: "link", worldclock: "clock", calendar: "layout", stocks: "tag", menuboard: "playlist", dataset: "terminal" };
-  const TYPE_LABEL = { image: "Imagem", video: "Video", text: "Texto", html: "HTML", url: "URL", youtube: "YouTube", embed: "Embed", audio: "Audio", clock: "Relogio", weather: "Clima", news: "Noticias", promo: "Promocoes", countdown: "Contagem", qrcode: "QR Code", rates: "Cotacoes", live: "Ao vivo (HLS)", pdf: "PDF", webpage: "Pagina web", worldclock: "Relogio mundial", calendar: "Calendario", stocks: "Acoes", menuboard: "Menu board", dataset: "DataSet" };
-  const WIDGET_TYPES = ["clock", "weather", "news", "promo", "countdown", "qrcode", "rates", "worldclock", "calendar", "stocks", "menuboard", "dataset"];
+  const TYPE_ICON = { image: "image", video: "video", text: "text", html: "code", url: "link", youtube: "youtube", embed: "music", audio: "music", clock: "clock", weather: "sun", news: "text", promo: "tag", countdown: "clock", qrcode: "layout", rates: "tag", lowerthird: "text", live: "video", pdf: "code", webpage: "link", worldclock: "clock", calendar: "layout", stocks: "tag", menuboard: "playlist", dataset: "terminal" };
+  const TYPE_LABEL = { image: "Imagem", video: "Video", text: "Texto", html: "HTML", url: "URL", youtube: "YouTube", embed: "Embed", audio: "Audio", clock: "Relogio", weather: "Clima", news: "Noticias", promo: "Promocoes", countdown: "Contagem", qrcode: "QR Code", rates: "Cotacoes", lowerthird: "Lower-third (CG)", live: "Ao vivo (HLS)", pdf: "PDF", webpage: "Pagina web", worldclock: "Relogio mundial", calendar: "Calendario", stocks: "Acoes", menuboard: "Menu board", dataset: "DataSet" };
+  const WIDGET_TYPES = ["clock", "weather", "news", "promo", "countdown", "qrcode", "rates", "lowerthird", "worldclock", "calendar", "stocks", "menuboard", "dataset"];
   // Modelos prontos de conteudo para acelerar a criacao de textos/cartazes.
   const MEDIA_TEMPLATES = {
     promo: { label: "Promocao", text: "OFERTA ESPECIAL\n50% OFF\nSomente hoje. Aproveite!", html: '<div style="text-align:center;color:#fff;font-family:system-ui"><div style="font-size:3vmin;letter-spacing:.3em;color:#7aa2f7">OFERTA ESPECIAL</div><div style="font-size:12vmin;font-weight:800;line-height:1">50% OFF</div><div style="font-size:3.5vmin;margin-top:2vmin">Somente hoje. Aproveite!</div></div>' },
@@ -170,11 +170,22 @@
   async function createScreenGroup(data) { return api("/api/screen-groups", { method: "POST", body: JSON.stringify(data) }); }
   async function sendScreenCommand(screenId, command_type, payload) { return api("/api/screens/" + screenId + "/commands", { method: "POST", body: JSON.stringify({ command_type, payload: payload || {} }) }); }
   async function requestScreenshot(screenId) { return api("/api/screens/" + screenId + "/screenshot", { method: "POST" }); }
+  // L4: Mesa de transmissao - helpers do canal de disparo ao vivo.
+  async function liveTrigger(screenId, spec) { return api("/api/live/" + screenId + "/trigger", { method: "POST", body: JSON.stringify(spec) }); }
+  async function liveClear(screenId, slotId) { return api("/api/live/" + screenId + "/clear", { method: "POST", body: JSON.stringify(slotId ? { slot_id: slotId } : {}) }); }
+  async function liveTakeover(screenId, spec) { return api("/api/live/" + screenId + "/takeover", { method: "POST", body: JSON.stringify(spec) }); }
+  async function liveTakeoverClear(screenId) { return api("/api/live/" + screenId + "/takeover/clear", { method: "POST" }); }
   async function loadProofOfPlay(days, screenSlug) {
     const qs = new URLSearchParams();
     if (days) qs.set("days", String(days));
     if (screenSlug) qs.set("screen", screenSlug);
     return api("/api/analytics/proof-of-play?" + qs.toString());
+  }
+  async function loadProofOfPlayAds(days, screenSlug) {
+    const qs = new URLSearchParams();
+    if (days) qs.set("days", String(days));
+    if (screenSlug) qs.set("screen", screenSlug);
+    return api("/api/analytics/proof-of-play/ads?" + qs.toString());
   }
   async function loadProofSummary(days, screenSlug) {
     const qs = new URLSearchParams();
@@ -187,6 +198,10 @@
   async function updateReportSchedule(id, data) { return api("/api/analytics/reports/" + id, { method: "PATCH", body: JSON.stringify(data) }); }
   async function sendReportSchedule(id) { return api("/api/analytics/reports/" + id + "/send", { method: "POST" }); }
   async function deleteReportSchedule(id) { return api("/api/analytics/reports/" + id, { method: "DELETE" }); }
+  async function loadAdBreaks() { return api("/api/ad-breaks"); }
+  async function createAdBreak(data) { return api("/api/ad-breaks", { method: "POST", body: JSON.stringify(data) }); }
+  async function updateAdBreak(id, data) { return api("/api/ad-breaks/" + id, { method: "PATCH", body: JSON.stringify(data) }); }
+  async function deleteAdBreak(id) { return api("/api/ad-breaks/" + id, { method: "DELETE" }); }
   async function previewScreen(id) { return api("/api/screens/" + id + "/preview"); }
   async function bulkImportMedia(items) { return api("/api/media/bulk", { method: "POST", body: JSON.stringify({ items }) }); }
   async function loadFolders() { return api("/api/folders"); }
@@ -297,6 +312,74 @@
     } catch (err) { toast({ kind: "err", msg: err.message }); }
   }
 
+  /** Mostra o relatorio de exibicao de anuncios (L5) dos ultimos 7 dias. */
+  async function reportAds() {
+    try {
+      const rows = await loadProofOfPlayAds(7);
+      if (!rows || !rows.length) { toast({ kind: "info", msg: "Sem exibicoes de anuncio nos ultimos 7 dias." }); return; }
+      const total = rows.reduce((acc, r) => acc + (r.plays || 0), 0);
+      const summary = rows.slice(0, 10).map((r) => r.media_name + ": " + r.plays + "x").join(" \u00b7 ");
+      toast({ kind: "info", title: "Anuncios (7 dias) \u2014 " + total + " exibicoes", msg: summary, timeout: 9000 });
+    } catch (err) { toast({ kind: "err", msg: err.message }); }
+  }
+
+  /** Gerencia ad-breaks recorrentes/agendados por relogio de parede (L6). */
+  async function openAdBreaksModal() {
+    const DAYS = [["0", "Seg"], ["1", "Ter"], ["2", "Qua"], ["3", "Qui"], ["4", "Sex"], ["5", "Sab"], ["6", "Dom"]];
+    const adMedia = (state.media || []).filter((m) => m.type === "image" || m.type === "video");
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.clock + '</span><span class="modal-title">Ad-breaks agendados (L6)</span></div>' +
+      '<div class="modal-body">' +
+        '<p class="hint">Anuncios em tela cheia disparados por relogio (ex.: a cada 15 min), dentro de uma janela diaria e nos dias escolhidos. Eles sobrepoem a playlist por alguns segundos e devolvem o controle &mdash; sem conflito com a programacao.</p>' +
+        '<div class="insp-section"><h5>Novo ad-break</h5>' +
+          '<div class="field"><label>Nome</label><input id="ab-name" placeholder="Ex.: Patrocinador A"/></div>' +
+          '<div class="field"><label>Midia do anuncio</label><select id="ab-media">' + (adMedia.length ? adMedia.map((m) => '<option value="' + m.id + '">' + esc(m.name) + ' (' + esc(m.type) + ')</option>').join("") : '<option value="">Nenhuma imagem/video disponivel</option>') + '</select></div>' +
+          '<div class="row" style="gap:10px"><div class="field grow"><label>A cada (min)</label><input id="ab-every" type="number" min="1" max="1440" value="15"/></div><div class="field grow"><label>Duracao (s)</label><input id="ab-dur" type="number" min="1" max="3600" value="15"/></div></div>' +
+          '<div class="row" style="gap:10px"><div class="field grow"><label>Inicio</label><input id="ab-start" type="time" value="08:00"/></div><div class="field grow"><label>Fim</label><input id="ab-end" type="time" value="20:00"/></div></div>' +
+          '<div class="field"><label>Tela</label><select id="ab-screen"><option value="">Todas as telas</option>' + (state.screens || []).map((s) => '<option value="' + s.id + '">' + esc(s.name) + '</option>').join("") + '</select></div>' +
+          '<div class="field"><label>Dias</label><div id="ab-days" class="row" style="gap:6px;flex-wrap:wrap">' + DAYS.map((d) => '<label class="tag" style="cursor:pointer;user-select:none"><input type="checkbox" value="' + d[0] + '" checked style="margin-right:4px"/>' + d[1] + '</label>').join("") + '</div></div>' +
+          '<button class="btn primary block small" data-ab-add>' + ICONS.plus + ' Criar ad-break</button>' +
+        '</div>' +
+        '<div class="insp-section"><h5>Ad-breaks ativos</h5><div id="ab-list"><p class="hint">Carregando...</p></div></div>' +
+      '</div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    const screenName = (id) => { const s = (state.screens || []).find((x) => String(x.id) === String(id)); return s ? s.name : null; };
+    const mediaName = (id) => { const m = (state.media || []).find((x) => String(x.id) === String(id)); return m ? m.name : ("#" + id); };
+    const dayLabel = (days) => DAYS.filter((d) => (days || "").indexOf(d[0]) !== -1).map((d) => d[1]).join(" ") || "todos";
+    async function refresh() {
+      const list = modal.querySelector("#ab-list");
+      try {
+        const rows = await loadAdBreaks();
+        if (!rows.length) { list.innerHTML = '<p class="hint">Nenhum ad-break agendado ainda.</p>'; return; }
+        list.innerHTML = rows.map((r) => '<div class="row" style="gap:8px;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border,#2a2a2a)"><span><strong>' + esc(r.name) + '</strong> &mdash; ' + esc(mediaName(r.media_id)) + '<br><span class="hint">a cada ' + r.every_minutes + ' min &middot; ' + r.duration_seconds + 's &middot; ' + esc(r.start_time) + '-' + esc(r.end_time) + ' &middot; ' + esc(dayLabel(r.days)) + ' &middot; ' + esc(screenName(r.screen_id) || "todas as telas") + (r.enabled ? '' : ' &middot; PAUSADO') + '</span></span><span class="row" style="gap:6px"><button class="btn ghost small" data-ab-toggle="' + r.id + '">' + ICONS.power + '</button><button class="btn danger small" data-ab-del="' + r.id + '">' + ICONS.trash + '</button></span></div>').join("");
+        list.querySelectorAll("[data-ab-toggle]").forEach((b) => b.addEventListener("click", async () => { const r = rows.find((x) => String(x.id) === String(b.dataset.abToggle)); if (!r) return; try { await updateAdBreak(r.id, { enabled: !r.enabled }); await refresh(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+        list.querySelectorAll("[data-ab-del]").forEach((b) => b.addEventListener("click", async () => { if (!(await confirmDialog({ title: "Excluir ad-break", message: "Remover este ad-break agendado?", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await deleteAdBreak(b.dataset.abDel); await refresh(); toast({ kind: "warn", msg: "Ad-break removido." }); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+      } catch (err) { list.innerHTML = '<p class="hint">Erro ao carregar: ' + esc(err.message) + '</p>'; }
+    }
+    modal.querySelector("[data-ab-add]").addEventListener("click", async () => {
+      const mediaId = Number(modal.querySelector("#ab-media").value);
+      if (!mediaId) { toast({ kind: "warn", msg: "Selecione a midia do anuncio (imagem/video)." }); return; }
+      const days = Array.from(modal.querySelectorAll("#ab-days input:checked")).map((i) => i.value).join("");
+      if (!days) { toast({ kind: "warn", msg: "Selecione ao menos um dia da semana." }); return; }
+      const screenVal = modal.querySelector("#ab-screen").value;
+      const body = {
+        name: (modal.querySelector("#ab-name").value || "Ad-break").trim() || "Ad-break",
+        media_id: mediaId,
+        every_minutes: Number(modal.querySelector("#ab-every").value) || 15,
+        duration_seconds: Number(modal.querySelector("#ab-dur").value) || 15,
+        start_time: modal.querySelector("#ab-start").value || "00:00",
+        end_time: modal.querySelector("#ab-end").value || "23:59",
+        days: days,
+        screen_id: screenVal ? Number(screenVal) : null,
+      };
+      try { await createAdBreak(body); await refresh(); toast({ kind: "ok", msg: "Ad-break criado." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
+    await refresh();
+  }
+
   async function openBIModal() {
     const modal = document.createElement("div");
     modal.className = "modal modal-wide";
@@ -308,6 +391,7 @@
     const body = modal.querySelector("#bi-body");
     let days = 7;
     let screenSlug = "";
+    let onlyAds = false;
     const exportCsv = async () => {
       const qs = new URLSearchParams();
       qs.set("days", String(days));
@@ -331,18 +415,19 @@
       body.innerHTML = '<p class="hint">Carregando...</p>';
       try {
         const summary = await loadProofSummary(days, screenSlug || null);
-        const rows = await loadProofOfPlay(days, screenSlug || null);
+        const rows = await (onlyAds ? loadProofOfPlayAds : loadProofOfPlay)(days, screenSlug || null);
         const reports = await loadReportSchedules();
         const max = Math.max(1, ...rows.map((r) => r.plays || 0));
         const bars = rows.slice(0, 12).map((r) => '<div class="problem info" style="display:block"><div class="row between"><strong>' + esc(r.media_name) + '</strong><span class="mono">' + r.plays + ' plays / ' + Math.round((r.total_seconds || 0) / 60) + ' min</span></div><div style="height:8px;background:rgba(255,255,255,.08);border-radius:99px;overflow:hidden;margin-top:8px"><div style="width:' + Math.max(4, Math.round((r.plays || 0) * 100 / max)) + '%;height:100%;background:var(--accent)"></div></div></div>').join("") || '<p class="empty">Sem eventos na janela.</p>';
         const reportRows = reports.map((r) => '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.recipients) + '</td><td><span class="tag">' + esc(r.frequency) + '</span></td><td class="mono">' + r.hour + ':00</td><td><span class="tag">' + (r.enabled ? "ativo" : "pausado") + '</span></td><td class="right"><button class="btn ghost small" data-send-report="' + r.id + '">' + ICONS.upload + '</button><button class="btn ghost small" data-toggle-report="' + r.id + '">' + ICONS.power + '</button><button class="btn danger small" data-del-report="' + r.id + '">' + ICONS.trash + '</button></td></tr>').join("") || '<tr><td colspan="6" class="empty">Nenhum relatório agendado.</td></tr>';
         body.innerHTML =
-          '<div class="row" style="gap:10px;align-items:end"><div class="field grow"><label>Janela</label><select id="bi-days"><option value="7">7 dias</option><option value="30">30 dias</option><option value="90">90 dias</option></select></div><div class="field grow"><label>Tela</label><select id="bi-screen"><option value="">Todas</option>' + state.screens.map((s) => '<option value="' + esc(s.slug) + '">' + esc(s.name) + '</option>').join("") + '</select></div></div>' +
+          '<div class="row" style="gap:10px;align-items:end"><div class="field grow"><label>Janela</label><select id="bi-days"><option value="7">7 dias</option><option value="30">30 dias</option><option value="90">90 dias</option></select></div><div class="field grow"><label>Tela</label><select id="bi-screen"><option value="">Todas</option>' + state.screens.map((s) => '<option value="' + esc(s.slug) + '">' + esc(s.name) + '</option>').join("") + '</select></div><div class="field"><label>Tipo</label><label class="switch" style="margin-top:6px;white-space:nowrap"><input type="checkbox" id="bi-ads"/> <span>Somente anuncios</span></label></div></div>' +
           '<div class="grid2" style="margin:10px 0"><div class="stat"><span>Plays</span><b>' + summary.total_plays + '</b></div><div class="stat"><span>Tempo total</span><b>' + Math.round((summary.total_seconds || 0) / 60) + ' min</b></div><div class="stat"><span>Midias</span><b>' + summary.unique_media + '</b></div><div class="stat"><span>Telas</span><b>' + summary.unique_screens + '</b></div></div>' +
-          '<h4 style="margin:12px 0 8px">Top midias</h4>' + bars +
+          '<h4 style="margin:12px 0 8px">' + (onlyAds ? "Top anuncios (ad-break)" : "Top midias") + '</h4>' + bars +
           '<h4 style="margin:16px 0 8px">Relatórios agendados</h4><table class="set-table"><thead><tr><th>Nome</th><th>Destinatários</th><th>Freq.</th><th>Hora</th><th>Status</th><th></th></tr></thead><tbody>' + reportRows + '</tbody></table>';
         const dsel = body.querySelector("#bi-days"); dsel.value = String(days); dsel.addEventListener("change", () => { days = Number(dsel.value); load(); });
         const ssel = body.querySelector("#bi-screen"); ssel.value = screenSlug; ssel.addEventListener("change", () => { screenSlug = ssel.value; load(); });
+        const adsel = body.querySelector("#bi-ads"); if (adsel) { adsel.checked = onlyAds; adsel.addEventListener("change", () => { onlyAds = adsel.checked; load(); }); }
         body.querySelectorAll("[data-send-report]").forEach((b) => b.addEventListener("click", async () => { try { const r = await sendReportSchedule(b.dataset.sendReport); toast({ kind: r.sent ? "ok" : "warn", msg: r.sent ? "Relatório enviado." : "SMTP não configurado; nada enviado." }); load(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
         body.querySelectorAll("[data-toggle-report]").forEach((b) => b.addEventListener("click", async () => { const r = reports.find((x) => String(x.id) === String(b.dataset.toggleReport)); if (!r) return; try { await updateReportSchedule(r.id, { enabled: !r.enabled }); load(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
         body.querySelectorAll("[data-del-report]").forEach((b) => b.addEventListener("click", async () => { if (!(await confirmDialog({ title: "Excluir relatório", message: "Remover este relatório agendado?", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await deleteReportSchedule(b.dataset.delReport); load(); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
@@ -691,12 +776,22 @@
       const pl = playlistById(z.default_playlist_id);
       const isEmpty = !pl || !pl.items || pl.items.length === 0;
       const body = isEmpty ? '<span class="zone-empty-tag">⚠ Sem conteúdo</span>' : esc(pl.name) + " - " + pl.items.length + " item(s)";
-      return '<div class="zone ' + (z.id === state.selectedZoneId ? "selected" : "") + (isEmpty ? " empty" : "") + '" data-zone="' + z.id + '" style="left:' + z.x + '%;top:' + z.y + '%;width:' + z.width + '%;height:' + z.height + '%"><div class="zone-label">' + ICONS.layout + '<span>' + esc(z.name) + '</span></div><div class="zone-body">' + body + '</div><div class="resize" data-resize="' + z.id + '"></div></div>';
+      return '<div class="zone ' + (z.id === state.selectedZoneId ? "selected" : "") + (isEmpty ? " empty" : "") + '" data-zone="' + z.id + '" style="left:' + z.x + '%;top:' + z.y + '%;width:' + z.width + '%;height:' + z.height + '%' + zoneStyleCss(z) + '"><div class="zone-label">' + ICONS.layout + '<span>' + esc(z.name) + '</span></div><div class="zone-body">' + body + '</div><div class="resize" data-resize="' + z.id + '"></div></div>';
     }).join("");
     const resTxt = (sc.resolution || "1920x1080") + (sc.orientation === "portrait" ? " vertical" : " horizontal");
     $("stage-hint").innerHTML = esc(sc.name) + " &middot; " + esc(resTxt) + " &middot; " + sc.zones.length + " zona(s) &middot; <a href=\"#\" id=\"screen-size-edit\" style=\"color:#7aa2f7\">ajustar tamanho</a>";
     const sizeEdit = $("screen-size-edit"); if (sizeEdit) sizeEdit.addEventListener("click", (e) => { e.preventDefault(); openScreenSizeModal(sc); });
     bindZoneInteractions();
+  }
+
+  function zoneStyleCss(z) {
+    let s = "";
+    if (z.bg_color === "transparent") s += ";background:repeating-conic-gradient(#0000 0% 25%, rgba(255,255,255,.08) 0% 50%) 50%/16px 16px";
+    else if (z.bg_color) s += ";background:" + z.bg_color;
+    if (z.opacity != null && z.opacity !== 1) s += ";opacity:" + z.opacity;
+    if (z.radius) s += ";border-radius:" + Math.round(z.radius) + "px";
+    if (z.border_width) s += ";border:" + z.border_width + "px solid " + (z.border_color || "#fff");
+    return s;
   }
 
   function bindZoneInteractions() {
@@ -798,6 +893,7 @@
     insp.innerHTML = '<div class="insp-head">' + ICONS.layout + '<span>Zona: ' + esc(z.name) + '</span></div>' +
       '<div class="insp-section"><h5>Identificacao</h5>' + field("Nome", '<input id="f-name" value="' + esc(z.name) + '"/>') + field("Camada (z-index)", '<input id="f-z" type="number" value="' + z.z_index + '"/>') + '</div>' +
       '<div class="insp-section"><h5>Geometria (% da tela)</h5><div class="grid2">' + rangeField("x", "X", z.x) + rangeField("y", "Y", z.y) + rangeField("w", "Largura", z.width) + rangeField("h", "Altura", z.height) + '</div></div>' +
+      '<div class="insp-section"><h5>Aparencia da zona</h5>' + zoneStyleFields(z) + '</div>' +
       '<div class="insp-section"><h5>Conteudo</h5>' +
       '<button class="btn primary block" data-quick-add>' + ICONS.plus + ' Adicionar conteudo</button>' +
       '<span class="hint" style="display:block;margin:6px 0 10px">Dica: clique com o botao direito na zona (no canvas) para abrir o menu rapido.</span>' +
@@ -830,10 +926,12 @@
       '<button class="btn ghost block small" style="margin-top:8px" data-draft-screen>' + ICONS.code + ' Voltar para rascunho</button>' +
       '<button class="btn ' + (sc.layout_locked ? "danger" : "ghost") + ' block small" style="margin-top:8px" data-lock-layout>' + ICONS.lock + ' ' + (sc.layout_locked ? "Destravar layout" : "Travar layout") + '</button><span class="hint" style="display:block;margin-top:6px">Quando travado, zonas e importacao de layout ficam bloqueadas; playlists e conteudo continuam editaveis.</span></div>' +
       '<div class="insp-section"><h5>Comandos P4</h5><button class="btn block small" data-cmd-shot>' + ICONS.eye + ' Screenshot</button><button class="btn ghost block small" style="margin-top:8px" data-cmd-identify>' + ICONS.info + ' Identificar tela</button><button class="btn ghost block small" style="margin-top:8px" data-cmd-reload>' + ICONS.refresh + ' Recarregar player</button><button class="btn ghost block small" style="margin-top:8px" data-cmd-list>' + ICONS.terminal + ' Ver fila de comandos</button><span class="hint" style="display:block;margin-top:6px">Power, volume, brilho, CEC/RS232 e shell exigem agente/hardware no player; a fila de comandos ja esta pronta para isso.</span></div>' +
+      '<div class="insp-section"><h5>Mesa de transmissao (ao vivo)</h5><button class="btn primary block small" data-broadcast-desk>' + ICONS.screen + ' Abrir mesa de transmissao</button><span class="hint" style="display:block;margin-top:6px">Empurre lower-thirds, banners e "ULTIMA HORA" para a tela instantaneamente, sem recarregar a playlist (via WebSocket).</span></div>' +
       '<div class="insp-section"><h5>Sincronia e emparelhamento</h5>' + field("Grupo de sincronia", '<input id="f-syncgroup" value="' + esc(sc.sync_group || "") + '" placeholder="ex.: vitrine-loja1"/>') + '<span class="hint" style="display:block;margin:-4px 0 10px">Telas no mesmo grupo recarregam juntas quando uma e atualizada.</span>' + (sc.pair_code ? '<div class="field"><label>Codigo de emparelhamento (TV)</label><div class="code">' + esc(sc.pair_code) + '</div></div><button class="btn ghost block small" data-copy-pair>' + ICONS.copy + ' Copiar codigo</button>' : '') + '</div>' +
       '<div class="insp-section"><h5>Atalhos de layout</h5><button class="btn block" data-add-ticker>' + ICONS.tag + ' Adicionar rodape de ticker (1 clique)</button><span class="hint" style="display:block;margin-top:6px">Cria uma zona fixa de rodape (15% da altura) ja com um ticker de promocoes.</span></div>' +
       '<div class="insp-section"><h5>Musica de fundo (tela)</h5>' + screenMusicField(sc) + '</div>' +
       '<div class="insp-section"><h5>Tema de cores</h5>' + themeFields(sc) + '</div>' +
+      '<div class="insp-section"><h5>Layout e fundo</h5>' + screenLayoutFields(sc) + '</div>' +
       '<div class="insp-section"><h5>Overlays (HUD)</h5>' + overlayListHtml(sc) + '<button class="btn block small" style="margin-top:8px" data-add-overlay>' + ICONS.plus + ' Adicionar overlay</button></div>' +
       '<div class="insp-section"><button class="btn block" data-add-zone>' + ICONS.plus + ' Adicionar zona</button><button class="btn block small" style="margin-top:8px" data-dup-screen>' + ICONS.copy + ' Duplicar tela</button><button class="btn danger block small" style="margin-top:8px" data-del-screen>' + ICONS.trash + ' Excluir tela</button></div>';
   }
@@ -868,6 +966,7 @@
       insp.querySelectorAll("#sf-days .day").forEach((d) => d.addEventListener("click", () => d.classList.toggle("on")));
       const as = insp.querySelector("[data-add-sched]"); if (as) as.addEventListener("click", () => addSchedule(z.id));
       insp.querySelectorAll("[data-del-sched]").forEach((b) => b.addEventListener("click", () => deleteSchedule(z.id, Number(b.dataset.delSched))));
+      bindZoneStyle(z, screenId);
     } else {
       const sc = screen();
       const sn = $("f-sname"); if (sn) { sn.addEventListener("input", () => { sc.name = sn.value; renderTabs(); renderSidebar(); }); sn.addEventListener("change", () => patchScreen(sc.id, { name: sn.value })); }
@@ -894,6 +993,7 @@
       const ident = insp.querySelector("[data-cmd-identify]"); if (ident) ident.addEventListener("click", () => screenCommand(sc, "identify"));
       const rel = insp.querySelector("[data-cmd-reload]"); if (rel) rel.addEventListener("click", () => screenCommand(sc, "reload"));
       const cmdList = insp.querySelector("[data-cmd-list]"); if (cmdList) cmdList.addEventListener("click", () => openScreenCommands(sc));
+      const bdk = insp.querySelector("[data-broadcast-desk]"); if (bdk) bdk.addEventListener("click", () => openBroadcastDesk(sc));
       const dsc = insp.querySelector("[data-dup-screen]"); if (dsc) dsc.addEventListener("click", () => duplicateScreen(sc));
       const bg = $("f-bgaudio"); if (bg) bg.addEventListener("change", () => setScreenMusic(bg.value ? Number(bg.value) : null));
       const um = insp.querySelector("[data-upload-music]"); if (um) um.addEventListener("click", uploadScreenMusic);
@@ -916,6 +1016,7 @@
       if (rtv) rtv.addEventListener("click", async () => {
         try { await api("/api/screens/" + sc.id, { method: "PATCH", body: JSON.stringify({ theme_bg: null, theme_text: null, theme_accent: null, theme_ticker_bg: null, theme_ticker_text: null }) }); await loadScreens(); renderInspector(); toast({ kind: "ok", msg: "Tema redefinido." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
       });
+      bindScreenLayout(sc);
       const aov = insp.querySelector("[data-add-overlay]");
       if (aov) aov.addEventListener("click", () => openOverlayModal(sc, null));
       insp.querySelectorAll("[data-edit-overlay]").forEach((b) => b.addEventListener("click", () => { const ov = (sc.overlays || []).find((o) => String(o.id) === b.dataset.editOverlay); if (ov) openOverlayModal(sc, ov); }));
@@ -1017,7 +1118,7 @@
     const fol = m.folder_id != null ? '<span class="chip">' + ICONS.folder + esc(folderName(m.folder_id) || "?") + '</span>' : "";
     const tags = (m.tags || []).slice(0, 3).map((t) => '<span class="chip">' + esc(t) + '</span>').join("");
     const meta = (fol || tags) ? '<div class="mc-meta">' + fol + tags + '</div>' : "";
-    return '<div class="media-card' + (m.id === state.selectedMediaId ? " sel" : "") + '" data-mcard="' + m.id + '">' + thumb + '<div class="mc-body"><div class="mc-name">' + esc(m.name) + '</div>' + meta + '<div class="mc-foot"><span class="tag">' + TYPE_LABEL[m.type] + '</span>' + (m.width && m.height ? '<span class="tag" title="Resolucao">' + m.width + '\u00d7' + m.height + '</span>' : '') + procBadge(m) + ((m.type === "image" || m.type === "video") ? '<button class="btn ghost small" data-reproc="' + m.id + '" title="Reprocessar midia">' + ICONS.refresh + '</button>' : '') + '<button class="btn danger small" data-del-media="' + m.id + '">' + ICONS.trash + '</button></div></div></div>';
+    return '<div class="media-card' + (m.id === state.selectedMediaId ? " sel" : "") + '" data-mcard="' + m.id + '">' + thumb + '<div class="mc-body"><div class="mc-name">' + esc(m.name) + '</div>' + meta + '<div class="mc-foot"><span class="tag">' + TYPE_LABEL[m.type] + '</span>' + (m.width && m.height ? '<span class="tag" title="Resolucao">' + m.width + '\u00d7' + m.height + '</span>' : '') + procBadge(m) + ((m.type === "image" || m.type === "video") ? '<button class="btn ghost small" data-reproc="' + m.id + '" title="Reprocessar midia">' + ICONS.refresh + '</button>' : '') + (m.type === "video" ? '<button class="btn ghost small" data-cues="' + m.id + '" title="Cue points (graficos por tempo)">' + ICONS.clock + '</button>' : '') + '<button class="btn danger small" data-del-media="' + m.id + '">' + ICONS.trash + '</button></div></div></div>';
   }
   function bindMediaDoc() {
     const search = $("media-search");
@@ -1039,12 +1140,78 @@
     doc.querySelectorAll("[data-mcard]").forEach((c) => c.addEventListener("click", (e) => { if (e.target.closest("[data-del-media]") || e.target.closest("[data-reproc]")) return; state.selectedMediaId = Number(c.dataset.mcard); doc.querySelectorAll("[data-mcard]").forEach((x) => x.classList.toggle("sel", x === c)); renderSidebar(); renderInspector(); }));
     doc.querySelectorAll("[data-del-media]").forEach((b) => b.addEventListener("click", async () => { if (!(await confirmDialog({ title: "Excluir midia", message: "Tem certeza que deseja excluir esta midia?", icon: "trash", confirmText: "Excluir", danger: true }))) return; try { await api("/api/media/" + b.dataset.delMedia, { method: "DELETE" }); await loadMedia(); renderSidebar(); renderDoc(); toast({ kind: "warn", msg: "Midia excluida." }); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
     doc.querySelectorAll("[data-reproc]").forEach((b) => b.addEventListener("click", async (e) => { e.stopPropagation(); try { await api("/api/media/" + b.dataset.reproc + "/process", { method: "POST" }); await loadMedia(); renderDoc(); toast({ kind: "ok", msg: "Reprocessamento enfileirado." }); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+    doc.querySelectorAll("[data-cues]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); const m = (state.media || []).find((x) => x.id === Number(b.dataset.cues)); if (m) openCuesModal(m); }));
   }
 
   // Overlay generico reutilizando as classes .modal-overlay / .modal.
   // ============== P0: Tema de cores e Overlays (HUD) ============== //
   function overlayKindLabel(kind) {
     return { clock: "Relogio", weather: "Clima", news: "Noticias", promo: "Promocoes", text: "Texto", countdown: "Contagem", qrcode: "QR Code", rates: "Cotacoes" }[kind] || kind;
+  }
+  function zoneStyleFields(z) {
+    const transparent = z.bg_color === "transparent";
+    const bgVal = (z.bg_color && z.bg_color !== "transparent") ? z.bg_color : "";
+    const safeBg = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(bgVal) ? bgVal : "#000000";
+    return '<div class="switch"><span>Fundo transparente</span><input id="zs-transp" type="checkbox" ' + (transparent ? "checked" : "") + '/></div>' +
+      '<div class="field" id="zs-bg-wrap"' + (transparent ? ' style="opacity:.4;pointer-events:none"' : '') + '><label>Cor de fundo</label><div class="row" style="gap:8px;align-items:center"><input type="color" id="zs-bg" value="' + safeBg + '" style="width:42px;height:32px;padding:0;border:0;background:none;cursor:pointer"/><input id="zs-bg-tx" value="' + esc(bgVal) + '" placeholder="#RRGGBB ou vazio (preto)" style="flex:1"/></div></div>' +
+      '<div class="grid2">' + field("Opacidade (0.1-1)", '<input id="zs-opacity" type="number" step="0.1" min="0.1" max="1" value="' + (z.opacity != null ? z.opacity : 1) + '"/>') + field("Cantos (0-50)", '<input id="zs-radius" type="number" step="1" min="0" max="50" value="' + (z.radius || 0) + '"/>') + '</div>' +
+      '<div class="grid2">' + field("Espacamento (0-40)", '<input id="zs-padding" type="number" step="1" min="0" max="40" value="' + (z.padding || 0) + '"/>') + field("Borda (px)", '<input id="zs-bw" type="number" step="1" min="0" max="20" value="' + (z.border_width || 0) + '"/>') + '</div>' +
+      field("Cor da borda", '<input id="zs-bc" value="' + esc(z.border_color || "") + '" placeholder="#RRGGBB"/>') +
+      field("Fonte (CSS font-family)", '<input id="zs-font" value="' + esc(z.font_family || "") + '" placeholder="ex.: Georgia, serif"/>') +
+      '<button class="btn primary block small" data-save-zstyle>' + ICONS.check + ' Salvar aparencia</button>' +
+      '<span class="hint" style="display:block;margin-top:6px">Fundo transparente deixa ver o fundo da tela atras da zona. Cor vazia = preto.</span>';
+  }
+  function bindZoneStyle(z, screenId) {
+    const insp = $("inspector");
+    const transp = $("zs-transp"); const wrap = $("zs-bg-wrap");
+    if (transp && wrap) transp.addEventListener("change", () => { wrap.style.opacity = transp.checked ? ".4" : "1"; wrap.style.pointerEvents = transp.checked ? "none" : "auto"; });
+    const c = $("zs-bg"); const t = $("zs-bg-tx");
+    if (c && t) { c.addEventListener("input", () => { t.value = c.value; }); t.addEventListener("input", () => { if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(t.value.trim())) c.value = t.value.trim(); }); }
+    const save = insp.querySelector("[data-save-zstyle]");
+    if (save) save.addEventListener("click", async () => {
+      const patch = {
+        bg_color: (transp && transp.checked) ? "transparent" : (($("zs-bg-tx").value.trim()) || null),
+        opacity: Math.min(1, Math.max(0.1, Number($("zs-opacity").value) || 1)),
+        radius: Math.min(50, Math.max(0, Number($("zs-radius").value) || 0)),
+        padding: Math.min(40, Math.max(0, Number($("zs-padding").value) || 0)),
+        border_width: Math.min(20, Math.max(0, Number($("zs-bw").value) || 0)),
+        border_color: ($("zs-bc").value.trim()) || null,
+        font_family: ($("zs-font").value.trim()) || null,
+      };
+      Object.assign(z, patch);
+      try { await api("/api/screens/" + screenId + "/zones/" + z.id, { method: "PATCH", body: JSON.stringify(patch) }); renderStage(); toast({ kind: "ok", msg: "Aparencia da zona salva." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
+  }
+  function screenLayoutFields(sc) {
+    const mode = sc.background_mode || "color";
+    const fit = sc.background_fit || "cover";
+    const images = (state.media || []).filter((m) => m.type === "image");
+    const mopt = (v, label) => '<option value="' + v + '"' + (mode === v ? " selected" : "") + '>' + label + '</option>';
+    const fopt = (v, label) => '<option value="' + v + '"' + (fit === v ? " selected" : "") + '>' + label + '</option>';
+    const imgSel = '<select id="sl-img"><option value="">- selecionar imagem -</option>' + images.map((m) => '<option value="' + m.id + '"' + (String(m.id) === String(sc.background_image_id || "") ? " selected" : "") + '>' + esc(m.name) + '</option>').join("") + '</select>';
+    return field("Fonte da tela (CSS font-family)", '<input id="sl-font" value="' + esc(sc.theme_font || "") + '" placeholder="ex.: Montserrat, sans-serif"/>') +
+      field("Fundo da tela", '<select id="sl-mode">' + mopt("color", "Cor (tema)") + mopt("image", "Imagem") + mopt("transparent", "Transparente") + '</select>') +
+      '<div class="field" id="sl-img-wrap"' + (mode === "image" ? "" : ' style="display:none"') + '><label>Imagem de fundo</label>' + imgSel + '</div>' +
+      '<div class="field" id="sl-fit-wrap"' + (mode === "image" ? "" : ' style="display:none"') + '><label>Ajuste da imagem</label><select id="sl-fit">' + fopt("cover", "Cobrir") + fopt("contain", "Conter") + fopt("fill", "Esticar") + fopt("tile", "Ladrilhar") + '</select></div>' +
+      '<button class="btn primary block small" data-save-layout>' + ICONS.check + ' Salvar layout e fundo</button>' +
+      '<span class="hint" style="display:block;margin-top:6px">Transparente deixa o fundo da tela vazio. A fonte vale para textos e widgets desta tela.</span>';
+  }
+  function bindScreenLayout(sc) {
+    const insp = $("inspector");
+    const mode = $("sl-mode");
+    const imgWrap = $("sl-img-wrap"); const fitWrap = $("sl-fit-wrap");
+    if (mode) mode.addEventListener("change", () => { const show = mode.value === "image"; if (imgWrap) imgWrap.style.display = show ? "" : "none"; if (fitWrap) fitWrap.style.display = show ? "" : "none"; });
+    const save = insp.querySelector("[data-save-layout]");
+    if (save) save.addEventListener("click", async () => {
+      const m = $("sl-mode") ? $("sl-mode").value : "color";
+      const patch = {
+        theme_font: ($("sl-font").value.trim()) || null,
+        background_mode: m,
+        background_image_id: (m === "image" && $("sl-img") && $("sl-img").value) ? Number($("sl-img").value) : null,
+        background_fit: $("sl-fit") ? $("sl-fit").value : "cover",
+      };
+      try { await api("/api/screens/" + sc.id, { method: "PATCH", body: JSON.stringify(patch) }); await loadScreens(); renderInspector(); toast({ kind: "ok", msg: "Layout e fundo salvos." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
   }
   function themeColorRow(id, label, val) {
     const v = val || "";
@@ -1090,7 +1257,10 @@
     const editing = !!ov;
     const o = ov || {};
     const kinds = ["clock", "weather", "news", "promo", "countdown", "qrcode", "rates", "text"];
-    const positions = [["top-left", "Sup. esquerda"], ["top", "Topo"], ["top-right", "Sup. direita"], ["left", "Esquerda"], ["center", "Centro"], ["right", "Direita"], ["bottom-left", "Inf. esquerda"], ["bottom", "Rodape"], ["bottom-right", "Inf. direita"]];
+    // L1: ancoras (valores com underscore). Inclui terco inferior e tela cheia.
+    const positions = [["top_left", "Sup. esquerda"], ["top", "Topo"], ["top_right", "Sup. direita"], ["left", "Esquerda"], ["center", "Centro"], ["right", "Direita"], ["bottom_left", "Inf. esquerda"], ["bottom", "Rodape"], ["bottom_right", "Inf. direita"], ["lower_third", "Terco inferior (lower-third)"], ["fullscreen", "Tela cheia (takeover)"]];
+    const anims = [["none", "Nenhuma"], ["fade", "Fade"], ["slide", "Slide"], ["wipe", "Wipe"]];
+    const animOpts = anims.map((a) => '<option value="' + a[0] + '">' + a[1] + '</option>').join("");
     let current = o.kind || "clock";
     const modal = document.createElement("div");
     modal.className = "modal modal-wide";
@@ -1104,7 +1274,8 @@
         '<div class="field"><label>2. Nome</label><input id="ov-name" value="' + esc(o.name || "") + '" placeholder="Ex.: Relogio do topo"/></div>' +
         '<div id="ov-dynamic"></div>' +
         '<div class="row" style="gap:10px"><div class="field grow"><label>Posicao</label><select id="ov-pos">' + posOpts + '</select></div><div class="field grow"><label>Exibicao</label><select id="ov-mode"><option value="fixed">Fixo (sempre visivel)</option><option value="timed">Temporizado (aparece/some)</option></select></div></div>' +
-        '<div class="row" style="gap:10px" id="ov-timing"><div class="field grow"><label>Intervalo (s)</label><input id="ov-interval" type="number" value="' + (o.interval_seconds || 300) + '"/></div><div class="field grow"><label>Duracao visivel (s)</label><input id="ov-visible" type="number" value="' + (o.visible_seconds || 15) + '"/></div></div>' +
+        '<div class="row" style="gap:10px"><div class="field grow"><label>Animacao de entrada</label><select id="ov-enter-anim">' + animOpts + '</select></div><div class="field grow"><label>Animacao de saida</label><select id="ov-exit-anim">' + animOpts + '</select></div><div class="field grow"><label>Margem segura (vmin)</label><input id="ov-margin" type="number" step="0.5" min="0" max="40" value="' + (o.margin != null ? o.margin : 2) + '"/></div></div>' +
+        '<div class="row" style="gap:10px" id="ov-timing"><div class="field grow"><label>Aparece apos (s)</label><input id="ov-enter-at" type="number" min="0" value="' + (o.enter_at || 0) + '"/></div><div class="field grow"><label>Fica visivel (s)</label><input id="ov-duration" type="number" min="0" value="' + (o.duration || o.visible_seconds || 15) + '"/></div><div class="field grow"><label>Repete a cada (s)</label><input id="ov-repeat" type="number" min="0" value="' + (o.repeat_every || o.interval_seconds || 300) + '"/></div></div>' +
         '<div class="row" style="gap:10px"><div class="field grow"><label>Largura (% tela, 0=auto)</label><input id="ov-width" type="number" value="' + (o.width || 0) + '"/></div><div class="field grow"><label>Altura (% tela, 0=auto)</label><input id="ov-height" type="number" value="' + (o.height || 0) + '"/></div></div>' +
         '<div class="row" style="gap:10px"><div class="field grow"><label>Opacidade (0.1-1)</label><input id="ov-opacity" type="number" step="0.1" min="0.1" max="1" value="' + (o.opacity != null ? o.opacity : 1) + '"/></div><div class="field grow"><label>Camada (z-index)</label><input id="ov-z" type="number" value="' + (o.z_index != null ? o.z_index : 50) + '"/></div></div>' +
         '<div class="switch"><span>Ativo</span><input id="ov-enabled" type="checkbox" ' + (o.enabled === false ? "" : "checked") + '/></div>' +
@@ -1122,8 +1293,11 @@
     };
     const syncKindBtns = () => modal.querySelectorAll("[data-okind]").forEach((b) => b.classList.toggle("active", b.dataset.okind === current));
     modal.querySelectorAll("[data-okind]").forEach((b) => b.addEventListener("click", () => { current = b.dataset.okind; syncKindBtns(); renderDynamic(); }));
-    modal.querySelector("#ov-pos").value = o.position || "bottom";
+    // Inicializa a ancora a partir de `anchor` (canonico) ou do legado `position`.
+    modal.querySelector("#ov-pos").value = (o.anchor || (o.position || "").replace(/-/g, "_") || "bottom");
     modal.querySelector("#ov-mode").value = o.mode || "fixed";
+    modal.querySelector("#ov-enter-anim").value = o.enter_anim || "fade";
+    modal.querySelector("#ov-exit-anim").value = o.exit_anim || "fade";
     const timing = modal.querySelector("#ov-timing");
     const syncTiming = () => { timing.style.display = modal.querySelector("#ov-mode").value === "timed" ? "" : "none"; };
     modal.querySelector("#ov-mode").addEventListener("change", syncTiming);
@@ -1137,10 +1311,18 @@
         name: (modal.querySelector("#ov-name").value || "").trim() || overlayKindLabel(current),
         kind: current,
         content: content,
-        position: modal.querySelector("#ov-pos").value,
+        // L1: `anchor` e canonico; `position` segue preenchido (hifen) p/ compat.
+        anchor: modal.querySelector("#ov-pos").value,
+        position: modal.querySelector("#ov-pos").value.replace(/_/g, "-"),
         mode: modal.querySelector("#ov-mode").value,
-        interval_seconds: Number(modal.querySelector("#ov-interval").value) || 300,
-        visible_seconds: Number(modal.querySelector("#ov-visible").value) || 15,
+        enter_anim: modal.querySelector("#ov-enter-anim").value,
+        exit_anim: modal.querySelector("#ov-exit-anim").value,
+        margin: Math.min(40, Math.max(0, Number(modal.querySelector("#ov-margin").value) || 0)),
+        enter_at: Math.max(0, Number(modal.querySelector("#ov-enter-at").value) || 0),
+        duration: Math.max(0, Number(modal.querySelector("#ov-duration").value) || 0),
+        repeat_every: Math.max(0, Number(modal.querySelector("#ov-repeat").value) || 0),
+        interval_seconds: Number(modal.querySelector("#ov-repeat").value) || 300,
+        visible_seconds: Number(modal.querySelector("#ov-duration").value) || 15,
         width: Number(modal.querySelector("#ov-width").value) || 0,
         height: Number(modal.querySelector("#ov-height").value) || 0,
         opacity: Math.min(1, Math.max(0.1, Number(modal.querySelector("#ov-opacity").value) || 1)),
@@ -1744,6 +1926,255 @@
     load();
   }
 
+  /**
+   * L4: Mesa de transmissao ao vivo. Permite ao operador empurrar lower-thirds,
+   * banners e tomadas de tela ("ULTIMA HORA") para a TV instantaneamente, alem
+   * de limpar os graficos. Usa o canal /api/live/{screen} (WebSocket).
+   */
+  // L3: gerenciador de cue points (graficos disparados por tempo de video).
+  function fmtSeconds(s) {
+    s = Math.max(0, Math.floor(Number(s) || 0));
+    const m = Math.floor(s / 60);
+    return (m > 0 ? m + "m" : "") + String(s % 60).padStart(m > 0 ? 2 : 1, "0") + "s";
+  }
+  function cueSummary(c) {
+    if (c.action === "clear_gfx") return "Limpar graficos" + (c.slot_id && c.slot_id !== "cue" ? " (slot " + esc(c.slot_id) + ")" : "");
+    if (c.action === "ad_break") return "Anuncio #" + (c.target_id || "?") + " em tela cheia" + (c.duration ? " (" + fmtSeconds(c.duration) + ")" : "");
+    let title = c.kind || "gfx";
+    try { const cfg = JSON.parse(c.content || "{}"); if (cfg.title) title = cfg.title + (cfg.subtitle ? " / " + cfg.subtitle : ""); } catch (e) {}
+    return "Mostrar: " + esc(title) + (c.duration ? " (" + fmtSeconds(c.duration) + ")" : "");
+  }
+  async function openCuesModal(media) {
+    const anchors = [["lower_third", "Terco inferior"], ["bottom", "Rodape"], ["top", "Topo"], ["top_left", "Sup. esquerda"], ["top_right", "Sup. direita"], ["center", "Centro"], ["fullscreen", "Tela cheia"]];
+    const anchorOpts = anchors.map((a) => '<option value="' + a[0] + '">' + a[1] + '</option>').join("");
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.clock + '</span><span class="modal-title">Cue points - ' + esc(media.name) + '</span></div>' +
+      '<div class="modal-body">' +
+        '<p class="hint">Os graficos disparam pelo tempo do proprio video (evento timeupdate), iguais em qualquer tela. Informe o instante em segundos.</p>' +
+        '<div class="insp-section"><h5>Pre-visualizacao</h5>' +
+          '<div id="cue-stage" style="position:relative;width:100%;aspect-ratio:16/9;background:#0b0b0f;border-radius:8px;overflow:hidden;border:1px solid var(--border,#2a2a2a)">' +
+            '<div id="cue-stage-bg" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#555;font-size:13px">Sem video de fundo</div>' +
+            '<div id="cue-stage-gfx" style="position:absolute;inset:0;pointer-events:none"></div>' +
+          '</div>' +
+          '<div id="cue-timeline" style="position:relative;height:34px;margin-top:8px;background:var(--panel,#15151b);border-radius:6px;cursor:pointer;border:1px solid var(--border,#2a2a2a)"></div>' +
+          '<div class="row" style="justify-content:space-between;margin-top:4px"><span class="hint" id="cue-tl-info">Clique na linha do tempo para marcar o instante.</span><span class="hint" id="cue-tl-dur">--</span></div>' +
+        '</div>' +
+        '<div class="insp-section"><h5>Novo cue</h5>' +
+          '<div class="row" style="gap:10px"><div class="field grow"><label>Tempo (s)</label><input id="cue-at" type="number" min="0" step="0.5" value="5"/></div><div class="field grow"><label>Acao</label><select id="cue-action"><option value="show_gfx">Mostrar GFX</option><option value="ad_break">Ad-break (anuncio)</option><option value="clear_gfx">Limpar GFX</option></select></div></div>' +
+          '<div id="cue-ad-fields" style="display:none"><div class="field"><label>Midia do anuncio</label><select id="cue-ad-media">' + (state.media || []).filter((m) => m.type === "image" || m.type === "video").map((m) => '<option value="' + m.id + '">' + esc(m.name) + ' (' + esc(m.type) + ')</option>').join("") + '</select></div><p class="hint">O anuncio aparece em tela cheia no tempo marcado e e contabilizado no relatorio de anuncios.</p></div>' +
+          '<div id="cue-gfx-fields">' +
+            '<div class="field"><label>Titulo</label><input id="cue-title" placeholder="Ex.: Joao Silva"/></div>' +
+            '<div class="field"><label>Subtitulo (opcional)</label><input id="cue-sub" placeholder="Ex.: Reporter"/></div>' +
+            '<div class="row" style="gap:10px"><div class="field grow"><label>Cor</label><input id="cue-color" type="color" value="#2563eb"/></div><div class="field grow"><label>Posicao</label><select id="cue-anchor">' + anchorOpts + '</select></div><div class="field grow"><label>Duracao (s, 0=fica)</label><input id="cue-dur" type="number" min="0" value="6"/></div></div>' +
+          '</div>' +
+          '<button class="btn primary block small" data-cue-add>' + ICONS.plus + ' Adicionar cue</button>' +
+        '</div>' +
+        '<div class="insp-section"><h5>Cues programados</h5><div id="cue-list"><p class="hint">Carregando...</p></div></div>' +
+      '</div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    const actionSel = modal.querySelector("#cue-action");
+    const gfxFields = modal.querySelector("#cue-gfx-fields");
+    const adFields = modal.querySelector("#cue-ad-fields");
+    actionSel.addEventListener("change", () => {
+      const v = actionSel.value;
+      gfxFields.style.display = v === "show_gfx" ? "" : "none";
+      adFields.style.display = v === "ad_break" ? "" : "none";
+      renderPreview();
+    });
+    // --- L6/L4: preview ao vivo do GFX + timeline visual dos cues --- //
+    const stage = modal.querySelector("#cue-stage");
+    const stageBg = modal.querySelector("#cue-stage-bg");
+    const gfxLayer = modal.querySelector("#cue-stage-gfx");
+    const timeline = modal.querySelector("#cue-timeline");
+    const tlInfo = modal.querySelector("#cue-tl-info");
+    const tlDur = modal.querySelector("#cue-tl-dur");
+    let videoDur = 0;
+    let previewVideo = null;
+    let lastCues = [];
+    if (media.type === "video" && media.path) {
+      previewVideo = document.createElement("video");
+      previewVideo.src = "/media/" + media.path;
+      previewVideo.muted = true; previewVideo.playsInline = true; previewVideo.preload = "metadata";
+      previewVideo.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000";
+      previewVideo.addEventListener("loadedmetadata", () => { videoDur = previewVideo.duration || 0; tlDur.textContent = fmtSeconds(videoDur); drawTimeline(); });
+      stageBg.style.display = "none";
+      stage.insertBefore(previewVideo, gfxLayer);
+    } else if (media.type === "image" && media.path) {
+      stageBg.innerHTML = '<img src="/media/' + esc(media.path) + '" style="max-width:100%;max-height:100%;object-fit:contain"/>';
+    }
+    function anchorBox(anchor) {
+      const m = "4%";
+      switch (anchor) {
+        case "fullscreen": return "inset:0;";
+        case "center": return "left:20%;right:20%;top:38%;";
+        case "top": return "left:18%;right:18%;top:" + m + ";";
+        case "bottom": return "left:18%;right:18%;bottom:" + m + ";";
+        case "top_left": return "left:" + m + ";top:" + m + ";max-width:46%;";
+        case "top_right": return "right:" + m + ";top:" + m + ";max-width:46%;";
+        case "lower_third": default: return "left:" + m + ";right:30%;bottom:10%;";
+      }
+    }
+    function currentSpec() {
+      const action = actionSel.value;
+      if (action === "ad_break") {
+        const adId = Number(modal.querySelector("#cue-ad-media").value);
+        const m = (state.media || []).find((x) => String(x.id) === String(adId));
+        return { action: action, adName: m ? m.name : "anuncio", adPath: m && m.path ? m.path : "", adType: m ? m.type : "image", dur: Number(modal.querySelector("#cue-dur").value) || 0 };
+      }
+      if (action === "clear_gfx") return { action: action };
+      return { action: "show_gfx", anchor: modal.querySelector("#cue-anchor").value, title: modal.querySelector("#cue-title").value || "", subtitle: modal.querySelector("#cue-sub").value || "", color: modal.querySelector("#cue-color").value || "#2563eb" };
+    }
+    function renderPreview(spec) {
+      const s = spec || currentSpec();
+      gfxLayer.innerHTML = "";
+      if (s.action === "clear_gfx") { gfxLayer.innerHTML = '<div style="position:absolute;left:4%;bottom:10%;color:#fff;background:rgba(0,0,0,.5);padding:6px 10px;border-radius:6px;font:600 12px system-ui">Limpa o GFX do slot</div>'; return; }
+      if (s.action === "ad_break") {
+        const inner = s.adPath ? (s.adType === "video" ? '<video src="/media/' + esc(s.adPath) + '" muted style="max-width:100%;max-height:100%;object-fit:contain"></video>' : '<img src="/media/' + esc(s.adPath) + '" style="max-width:100%;max-height:100%;object-fit:contain"/>') : '<span style="color:#fff;font:700 18px system-ui">ANUNCIO (tela cheia)</span>';
+        gfxLayer.innerHTML = '<div style="position:absolute;inset:0;background:#000;display:flex;align-items:center;justify-content:center">' + inner + '<div style="position:absolute;top:8px;right:10px;background:#b02a2a;color:#fff;font:700 11px system-ui;padding:3px 8px;border-radius:99px">ANUNCIO' + (s.dur ? ' &middot; ' + s.dur + 's' : '') + '</div></div>';
+        return;
+      }
+      const align = /right/.test(s.anchor) ? "right" : "left";
+      gfxLayer.innerHTML = '<div style="position:absolute;' + anchorBox(s.anchor) + 'text-align:' + align + '">' +
+        '<div style="display:inline-block;background:rgba(10,10,15,.82);border-' + (align === "right" ? "right" : "left") + ':5px solid ' + esc(s.color || "#2563eb") + ';padding:8px 14px;border-radius:6px;max-width:100%">' +
+          (s.title ? '<div style="color:#fff;font:700 18px system-ui;line-height:1.1">' + esc(s.title) + '</div>' : '') +
+          (s.subtitle ? '<div style="color:#cfd2dc;font:500 13px system-ui;margin-top:2px">' + esc(s.subtitle) + '</div>' : '') +
+          (!s.title && !s.subtitle ? '<div style="color:#888;font:500 13px system-ui">Lower-third (preview)</div>' : '') +
+        '</div></div>';
+    }
+    function nominalDuration() { let mx = 30; (lastCues || []).forEach((c) => { mx = Math.max(mx, (c.at_seconds || 0) + 10); }); return mx; }
+    function drawTimeline() {
+      const dur = videoDur || nominalDuration();
+      if (!videoDur) tlDur.textContent = "~" + fmtSeconds(dur);
+      timeline.querySelectorAll(".cue-mk").forEach((e) => e.remove());
+      (lastCues || []).forEach((c) => {
+        const left = Math.max(0, Math.min(100, ((c.at_seconds || 0) / dur) * 100));
+        const mk = document.createElement("div");
+        mk.className = "cue-mk";
+        const col = c.action === "ad_break" ? "#b02a2a" : (c.action === "clear_gfx" ? "#888" : "#2563eb");
+        mk.style.cssText = "position:absolute;top:3px;bottom:3px;width:3px;border-radius:2px;background:" + col + ";left:" + left + "%;transform:translateX(-1px);cursor:pointer";
+        mk.title = fmtSeconds(c.at_seconds) + " - " + cueSummary(c);
+        mk.addEventListener("click", (ev) => { ev.stopPropagation(); previewCue(c); });
+        timeline.appendChild(mk);
+      });
+    }
+    function previewCue(c) {
+      if (previewVideo && videoDur) { try { previewVideo.currentTime = Math.min(videoDur - 0.1, c.at_seconds || 0); } catch (e) {} }
+      let parsed = {}; try { parsed = c.content ? JSON.parse(c.content) : {}; } catch (e) {}
+      if (c.action === "ad_break") { const m = (state.media || []).find((x) => String(x.id) === String(c.target_id)); renderPreview({ action: "ad_break", adPath: m && m.path ? m.path : "", adType: m ? m.type : "image", adName: m ? m.name : "anuncio", dur: c.duration }); }
+      else if (c.action === "clear_gfx") renderPreview({ action: "clear_gfx" });
+      else renderPreview({ action: "show_gfx", anchor: c.anchor, title: parsed.title || "", subtitle: parsed.subtitle || "", color: parsed.color || "#2563eb" });
+      tlInfo.textContent = "Cue em " + fmtSeconds(c.at_seconds);
+    }
+    timeline.addEventListener("click", (ev) => {
+      const rect = timeline.getBoundingClientRect();
+      const frac = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+      const dur = videoDur || nominalDuration();
+      const t = Math.round(frac * dur * 10) / 10;
+      modal.querySelector("#cue-at").value = String(t);
+      if (previewVideo && videoDur) { try { previewVideo.currentTime = Math.min(videoDur - 0.1, t); } catch (e) {} }
+      tlInfo.textContent = "Tempo marcado: " + fmtSeconds(t);
+      renderPreview();
+    });
+    ["#cue-title", "#cue-sub", "#cue-color", "#cue-anchor", "#cue-ad-media", "#cue-dur"].forEach((sel) => { const el = modal.querySelector(sel); if (el) el.addEventListener("input", () => renderPreview()); });
+    renderPreview();
+    async function refresh() {
+      const list = modal.querySelector("#cue-list");
+      try {
+        const cues = await api("/api/media/" + media.id + "/cues");
+        lastCues = cues; drawTimeline();
+        if (!cues.length) { list.innerHTML = '<p class="hint">Nenhum cue ainda. Adicione acima.</p>'; return; }
+        list.innerHTML = cues.map((c) => '<div class="row" style="gap:8px;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border,#2a2a2a)"><span><strong>' + fmtSeconds(c.at_seconds) + '</strong> &mdash; ' + cueSummary(c) + '</span><button class="btn danger small" data-cue-del="' + c.id + '">' + ICONS.trash + '</button></div>').join("");
+        list.querySelectorAll("[data-cue-del]").forEach((b) => b.addEventListener("click", async () => { try { await api("/api/media/" + media.id + "/cues/" + b.dataset.cueDel, { method: "DELETE" }); await refresh(); toast({ kind: "warn", msg: "Cue removido." }); } catch (err) { toast({ kind: "err", msg: err.message }); } }));
+      } catch (err) { list.innerHTML = '<p class="hint">Erro ao carregar: ' + esc(err.message) + '</p>'; }
+    }
+    modal.querySelector("[data-cue-add]").addEventListener("click", async () => {
+      const action = actionSel.value;
+      const body = { at_seconds: Number(modal.querySelector("#cue-at").value) || 0, action: action };
+      if (action === "ad_break") {
+        const adId = Number(modal.querySelector("#cue-ad-media").value);
+        if (!adId) { toast({ kind: "warn", msg: "Selecione a midia do anuncio." }); return; }
+        body.kind = "image";
+        body.target_id = adId;
+        body.anchor = "fullscreen";
+        body.duration = Number(modal.querySelector("#cue-dur").value) || 0;
+      } else if (action === "show_gfx") {
+        const anchor = modal.querySelector("#cue-anchor").value;
+        const title = (modal.querySelector("#cue-title").value || "").trim();
+        const sub = (modal.querySelector("#cue-sub").value || "").trim();
+        if (!title && !sub) { toast({ kind: "warn", msg: "Informe um titulo." }); return; }
+        body.kind = "lowerthird";
+        body.anchor = anchor;
+        body.content = JSON.stringify({ title: title, subtitle: sub, color: modal.querySelector("#cue-color").value || "#2563eb", align: /right/.test(anchor) ? "right" : "left" });
+        body.duration = Number(modal.querySelector("#cue-dur").value) || 0;
+      }
+      try { await api("/api/media/" + media.id + "/cues", { method: "POST", body: JSON.stringify(body) }); await refresh(); toast({ kind: "ok", msg: "Cue adicionado." }); } catch (err) { toast({ kind: "err", msg: err.message }); }
+    });
+    await refresh();
+  }
+
+  async function openBroadcastDesk(sc) {
+    const anchors = [["lower_third", "Terco inferior"], ["bottom", "Rodape"], ["top", "Topo"], ["top_left", "Sup. esquerda"], ["top_right", "Sup. direita"], ["center", "Centro"]];
+    const anchorOpts = anchors.map((a) => '<option value="' + a[0] + '">' + a[1] + '</option>').join("");
+    const modal = document.createElement("div");
+    modal.className = "modal modal-wide";
+    modal.innerHTML = '<div class="modal-head"><span class="modal-ico">' + ICONS.screen + '</span><span class="modal-title">Mesa de transmissao - ' + esc(sc.name) + '</span></div>' +
+      '<div class="modal-body">' +
+        '<p class="hint">Os comandos sao aplicados na hora, sem recarregar a playlist. Requer player conectado (WebSocket).</p>' +
+        '<div class="insp-section"><h5>Lower-third / banner</h5>' +
+          '<div class="field"><label>Titulo</label><input id="bd-title" placeholder="Ex.: Joao Silva"/></div>' +
+          '<div class="field"><label>Subtitulo (opcional)</label><input id="bd-sub" placeholder="Ex.: Diretor de operacoes"/></div>' +
+          '<div class="row" style="gap:10px"><div class="field grow"><label>Cor de destaque</label><input id="bd-color" type="color" value="#2563eb"/></div><div class="field grow"><label>Posicao</label><select id="bd-anchor">' + anchorOpts + '</select></div></div>' +
+          '<div class="row" style="gap:10px"><div class="field grow"><label>Animacao</label><select id="bd-anim"><option value="slide">Slide</option><option value="fade">Fade</option><option value="wipe">Wipe</option><option value="none">Nenhuma</option></select></div><div class="field grow"><label>Duracao (s, 0=ate limpar)</label><input id="bd-dur" type="number" min="0" value="0"/></div></div>' +
+          '<button class="btn primary block small" data-bd-push>' + ICONS.plus + ' Empurrar grafico</button>' +
+        '</div>' +
+        '<div class="insp-section"><h5>Tomada de tela (ULTIMA HORA)</h5>' +
+          '<div class="field"><label>Titulo</label><input id="bd-tk-title" value="ULTIMA HORA"/></div>' +
+          '<div class="field"><label>Subtitulo (opcional)</label><input id="bd-tk-sub" placeholder="Linha de apoio"/></div>' +
+          '<div class="row" style="gap:10px"><div class="field grow"><label>Cor de fundo</label><input id="bd-tk-color" type="color" value="#b91c1c"/></div><div class="field grow"><label>Duracao (s, 0=ate limpar)</label><input id="bd-tk-dur" type="number" min="0" value="0"/></div></div>' +
+          '<button class="btn danger block small" data-bd-takeover>' + ICONS.alert + ' Disparar tomada de tela</button>' +
+        '</div>' +
+        '<div class="insp-section"><h5>Limpar</h5>' +
+          '<button class="btn ghost block small" data-bd-clear>' + ICONS.trash + ' Limpar graficos ao vivo</button>' +
+          '<button class="btn ghost block small" style="margin-top:8px" data-bd-tk-clear>' + ICONS.close + ' Encerrar tomada de tela</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button></div>';
+    const ui = buildOverlay(modal);
+    modal.querySelector("[data-cancel]").addEventListener("click", ui.close);
+    const run = async (fn, okMsg) => { try { await fn(); toast({ kind: "ok", msg: okMsg }); } catch (err) { toast({ kind: "err", msg: err.message }); } };
+    modal.querySelector("[data-bd-push]").addEventListener("click", () => {
+      const title = (modal.querySelector("#bd-title").value || "").trim();
+      const sub = (modal.querySelector("#bd-sub").value || "").trim();
+      if (!title && !sub) { toast({ kind: "warn", msg: "Informe um titulo." }); return; }
+      const anchor = modal.querySelector("#bd-anchor").value;
+      // L2: empurra um lower-third CG estruturado (titulo/subtitulo/cor) em vez
+      // de texto simples. O alinhamento segue a ancora (direita nos cantos dir.).
+      const cg = { title: title, subtitle: sub, color: modal.querySelector("#bd-color").value || "#2563eb", align: /right/.test(anchor) ? "right" : "left" };
+      run(() => liveTrigger(sc.id, {
+        kind: "lowerthird", content: JSON.stringify(cg), name: "lower-third", slot_id: "lower",
+        anchor: anchor,
+        enter_anim: modal.querySelector("#bd-anim").value,
+        exit_anim: "fade",
+        duration: Math.max(0, Number(modal.querySelector("#bd-dur").value) || 0),
+      }), "Grafico empurrado para a tela.");
+    });
+    modal.querySelector("[data-bd-takeover]").addEventListener("click", () => {
+      const title = (modal.querySelector("#bd-tk-title").value || "").trim();
+      if (!title) { toast({ kind: "warn", msg: "Informe um titulo." }); return; }
+      run(() => liveTakeover(sc.id, {
+        title: title,
+        subtitle: (modal.querySelector("#bd-tk-sub").value || "").trim() || null,
+        color: modal.querySelector("#bd-tk-color").value || "#b91c1c",
+        duration: Math.max(0, Number(modal.querySelector("#bd-tk-dur").value) || 0),
+      }), "Tomada de tela disparada.");
+    });
+    modal.querySelector("[data-bd-clear]").addEventListener("click", () => run(() => liveClear(sc.id, null), "Graficos ao vivo limpos."));
+    modal.querySelector("[data-bd-tk-clear]").addEventListener("click", () => run(() => liveTakeoverClear(sc.id), "Tomada de tela encerrada."));
+  }
+
   /** Assistente de nova tela: nome, fuso e layout inicial (1, 2 ou 3 zonas). */
   async function duplicateScreen(sc) {
     const input = await promptDialog({ title: "Duplicar tela", message: "Nome da nova tela:", icon: "copy", placeholder: sc.name + " (copia)", confirmText: "Duplicar" });
@@ -1920,6 +2351,7 @@
     if (t === "calendar") return '<div class="field"><label>3. Titulo</label><input id="wf-title" placeholder="Agenda"/></div><div class="field"><label>Eventos (um por linha: AAAA-MM-DD | HH:MM | Titulo)</label><textarea id="wf-events" rows="5" placeholder="2026-06-20 | 09:00 | Abertura da loja"></textarea></div>';
     if (t === "stocks") return '<div class="field"><label>3. Simbolos Stooq (um por linha)</label><textarea id="wf-symbols" rows="4" placeholder="AAPL.US&#10;MSFT.US&#10;PETR4.BR"></textarea></div><div class="field"><label>Titulo</label><input id="wf-title" placeholder="Mercado"/></div><span class="hint">Proxy publico via Stooq, sem chave.</span>';
     if (t === "menuboard") return '<div class="field"><label>3. Titulo</label><input id="wf-title" placeholder="Cardapio"/></div><div class="field"><label>Categorias JSON</label><textarea id="wf-menu" rows="8">[{&quot;name&quot;:&quot;Pratos&quot;,&quot;items&quot;:[{&quot;name&quot;:&quot;Executivo&quot;,&quot;price&quot;:&quot;R$ 29&quot;,&quot;note&quot;:&quot;arroz, feijao e salada&quot;}]}]</textarea></div>';
+    if (t === "lowerthird") return '<div class="field"><label>3. Titulo</label><input id="wf-title" placeholder="Ex.: Joao Silva"/></div><div class="field"><label>Subtitulo (opcional)</label><input id="wf-sub" placeholder="Ex.: Diretor de operacoes"/></div><div class="row" style="gap:10px"><div class="field grow"><label>Cor de destaque</label><input id="wf-color" type="color" value="#2563eb"/></div><div class="field grow"><label>Alinhamento</label><select id="wf-align"><option value="left">Esquerda</option><option value="right">Direita</option></select></div></div><div class="field"><label>Logo (URL, opcional)</label><input id="wf-logo" placeholder="https://.../logo.png"/></div><span class="hint">Gerador de caracteres (CG): faixa com titulo, subtitulo e logo. Use em zona de rodape ou dispare pela Mesa de transmissao.</span>';
     if (t === "dataset") { const opts = state.datasets.map((d) => '<option value="' + d.id + '">' + esc(d.name) + '</option>').join(""); return '<div class="field"><label>3. DataSet</label><select id="wf-dataset"><option value="">Usar linhas JSON abaixo</option>' + opts + '</select></div><div class="row" style="gap:10px"><div class="field grow"><label>Titulo</label><input id="wf-title" placeholder="Tabela"/></div><div class="field grow"><label>Limite de linhas</label><input id="wf-limit" type="number" value="12"/></div></div><div class="field"><label>Linhas fallback JSON</label><textarea id="wf-rows" rows="6">[{&quot;item&quot;:&quot;Exemplo&quot;,&quot;valor&quot;:&quot;123&quot;}]</textarea></div>'; }
     return '<div class="field"><label>3. Produtos (um por linha: Nome | preco | obs)</label><textarea id="wf-products" rows="5" placeholder="Pizza grande | R$ 49,90 | ate sexta"></textarea></div><div class="row" style="gap:10px"><div class="field grow"><label>Titulo</label><input id="wf-title" placeholder="Promocoes"/></div><div class="field grow"><label>Velocidade (s)</label><input id="wf-speed" type="number" value="50"/></div></div><span class="hint">Faixa deslizante (vermelha), ideal no rodape da zona.</span>';
   }
@@ -1934,6 +2366,7 @@
     if (t === "countdown") return { title: title, target: val("#wf-target") || "", doneText: (val("#wf-done") || "").trim() };
     if (t === "qrcode") return { title: title, data: (val("#wf-data") || "").trim(), size: Number(val("#wf-size")) || 320 };
     if (t === "rates") return { title: title || "Cotacoes", pairs: lines("#wf-pairs").map((s) => s.toUpperCase()) };
+    if (t === "lowerthird") return { title: title, subtitle: (val("#wf-sub") || "").trim(), color: val("#wf-color") || "#2563eb", align: val("#wf-align") || "left", logo: (val("#wf-logo") || "").trim() };
     if (t === "worldclock") return { title: title || "Horario global", zones: lines("#wf-zones").map((line) => { const p = line.split("|").map((s) => s.trim()); return { label: p[0] || p[1] || "UTC", timezone: p[1] || p[0] || "UTC" }; }) };
     if (t === "calendar") return { title: title || "Agenda", events: lines("#wf-events").map((line) => { const p = line.split("|").map((s) => s.trim()); return { date: p[0] || "", time: p[1] || "", title: p[2] || p[1] || "" }; }) };
     if (t === "stocks") return { title: title || "Mercado", symbols: lines("#wf-symbols").map((s) => s.toUpperCase()) };
@@ -2295,7 +2728,7 @@
     const renderRows = () => {
       const rows = (state.campaigns || []).map((c) => {
         const pl = playlistById(c.playlist_id);
-        return '<tr><td>' + esc(c.name) + '</td><td><span class="tag">' + esc(c.mode) + '</span></td><td>' + esc(pl ? pl.name : "#" + c.playlist_id) + '</td><td>' + esc(campaignTargetLabel(c)) + '</td><td class="mono">' + (c.priority || 0) + '</td><td><span class="tag">' + (c.enabled ? "ativa" : "pausada") + '</span></td><td class="right"><button class="btn ghost small" data-camp-toggle="' + c.id + '">' + ICONS.power + '</button><button class="btn danger small" data-camp-del="' + c.id + '">' + ICONS.trash + '</button></td></tr>';
+        return '<tr><td>' + esc(c.name) + '</td><td><span class="tag">' + esc(c.mode) + '</span></td><td>' + esc(pl ? pl.name : "#" + c.playlist_id) + '</td><td>' + esc(campaignTargetLabel(c)) + '</td><td class="mono">' + (c.priority || 0) + (c.weight != null && c.weight !== 1 ? ' \u00d7' + c.weight : '') + '</td><td><span class="tag">' + (c.enabled ? "ativa" : "pausada") + '</span></td><td class="right"><button class="btn ghost small" data-camp-toggle="' + c.id + '">' + ICONS.power + '</button><button class="btn danger small" data-camp-del="' + c.id + '">' + ICONS.trash + '</button></td></tr>';
       }).join("") || '<tr><td colspan="7" class="empty">Nenhuma campanha cadastrada.</td></tr>';
       modal.querySelector("#camp-list").innerHTML = rows;
       bindRows();
@@ -2305,7 +2738,7 @@
         '<table class="set-table"><thead><tr><th>Nome</th><th>Modo</th><th>Playlist</th><th>Alvo</th><th>Prio</th><th>Status</th><th></th></tr></thead><tbody id="camp-list"></tbody></table>' +
         '<label class="mm-label">Nova campanha</label>' +
         '<div class="row" style="gap:10px"><div class="field grow"><label>Nome</label><input id="camp-name" placeholder="Ex.: Oferta relampago"/></div><div class="field"><label>Modo</label><select id="camp-mode"><option value="scheduled">Agendada</option><option value="interrupt">Interrupcao</option></select></div></div>' +
-        '<div class="row" style="gap:10px"><div class="field grow"><label>Playlist</label><select id="camp-playlist">' + state.playlists.map((p) => '<option value="' + p.id + '"' + (p.id === state.openPlaylistId ? " selected" : "") + '>' + esc(p.name) + '</option>').join("") + '</select></div><div class="field"><label>Prioridade</label><input id="camp-priority" type="number" value="10"/></div><div class="field"><label>Max/hora</label><input id="camp-max" type="number" min="1" placeholder="sem limite"/></div></div>' +
+        '<div class="row" style="gap:10px"><div class="field grow"><label>Playlist</label><select id="camp-playlist">' + state.playlists.map((p) => '<option value="' + p.id + '"' + (p.id === state.openPlaylistId ? " selected" : "") + '>' + esc(p.name) + '</option>').join("") + '</select></div><div class="field"><label>Prioridade</label><input id="camp-priority" type="number" value="10"/></div><div class="field"><label title="Rotacao ponderada entre campanhas de mesma prioridade">Peso</label><input id="camp-weight" type="number" min="0" value="1"/></div><div class="field"><label>Max/hora</label><input id="camp-max" type="number" min="1" placeholder="sem limite"/></div></div>' +
         '<div class="row" style="gap:10px"><div class="field grow"><label>Tela alvo</label><select id="camp-screen"><option value="">Todas</option>' + state.screens.map((s) => '<option value="' + s.id + '">' + esc(s.name) + '</option>').join("") + '</select></div><div class="field grow"><label>Grupo alvo</label><select id="camp-group"><option value="">Nenhum</option>' + state.screenGroups.map((g) => '<option value="' + g.id + '">' + esc(g.name) + '</option>').join("") + '</select></div><div class="field grow"><label>Zona alvo</label><select id="camp-zone"><option value="">Todas as zonas</option>' + zoneOptions.map((z) => '<option value="' + z.id + '">' + esc(z.label) + '</option>').join("") + '</select></div></div>' +
         '<div class="row" style="gap:10px"><div class="field grow"><label>Inicio</label><input id="camp-start" type="datetime-local"/></div><div class="field grow"><label>Fim</label><input id="camp-end" type="datetime-local"/></div></div>' +
       '</div><div class="modal-actions"><button class="btn ghost" data-cancel>Fechar</button><button class="btn primary" data-create-camp>' + ICONS.plus + ' Criar campanha</button></div>';
@@ -2339,6 +2772,7 @@
         start_at: modal.querySelector("#camp-start").value || null,
         end_at: modal.querySelector("#camp-end").value || null,
         priority: Number(modal.querySelector("#camp-priority").value) || 0,
+        weight: Math.max(0, Number(modal.querySelector("#camp-weight").value) || 0),
         enabled: true,
       };
       if (max > 0) body.max_plays_per_hour = max;
@@ -2642,6 +3076,8 @@
     { icon: "eye", label: "Solicitar screenshot da tela atual", run: () => { const s = screen(); if (s) screenCommand(s, "screenshot"); } },
     { icon: "info", label: "Identificar tela atual", run: () => { const s = screen(); if (s) screenCommand(s, "identify"); } },
     { icon: "timeline", label: "Relatorio de exibicao (proof-of-play 7d)", run: () => reportProofOfPlay() },
+    { icon: "timeline", label: "Relatorio de anuncios (ad-break L5)", run: () => reportAds() },
+    { icon: "clock", label: "Ad-breaks agendados (recorrentes L6)", run: () => openAdBreaksModal() },
     { icon: "timeline", label: "Abrir BI / exportar proof-of-play", run: () => openBIModal() },
     { icon: "info", label: "Abrir guia de uso (tutorial)", run: () => openOnboard() },
     { icon: "power", label: "Sair (logout)", run: () => logout() },

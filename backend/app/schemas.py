@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .models import FitMode, MediaType, Transition, UserRole
+
+# Animacoes de entrada/saida de overlays (L1 - Live Graphics).
+AnimKind = Literal["none", "fade", "slide", "wipe"]
 
 
 def _split_tags(value: object) -> object:
@@ -546,6 +549,13 @@ class ZoneBase(BaseModel):
     default_playlist_id: int | None = Field(
         None, description="Playlist exibida fora de qualquer agendamento."
     )
+    bg_color: str | None = Field(None, max_length=32, description="Cor de fundo da zona; 'transparent' mostra o fundo da tela. Nulo = preto.")
+    opacity: float = Field(1.0, ge=0.1, le=1.0)
+    radius: float = Field(0.0, ge=0, le=50, description="Cantos arredondados (% do menor lado).")
+    padding: float = Field(0.0, ge=0, le=40, description="Espacamento interno (% do menor lado).")
+    border_width: float = Field(0.0, ge=0, le=20, description="Espessura da borda em px.")
+    border_color: str | None = Field(None, max_length=32)
+    font_family: str | None = Field(None, max_length=120, description="Fonte CSS do conteudo de texto da zona.")
 
 
 class ZoneCreate(ZoneBase):
@@ -562,6 +572,13 @@ class ZoneUpdate(BaseModel):
     height: float | None = Field(None, ge=1, le=100)
     z_index: int | None = None
     default_playlist_id: int | None = None
+    bg_color: str | None = Field(None, max_length=32)
+    opacity: float | None = Field(None, ge=0.1, le=1.0)
+    radius: float | None = Field(None, ge=0, le=50)
+    padding: float | None = Field(None, ge=0, le=40)
+    border_width: float | None = Field(None, ge=0, le=20)
+    border_color: str | None = Field(None, max_length=32)
+    font_family: str | None = Field(None, max_length=120)
 
 
 class ZoneRead(ZoneBase):
@@ -625,6 +642,10 @@ class ScreenUpdate(BaseModel):
     theme_accent: str | None = Field(None, max_length=16)
     theme_ticker_bg: str | None = Field(None, max_length=16)
     theme_ticker_text: str | None = Field(None, max_length=16)
+    theme_font: str | None = Field(None, max_length=120)
+    background_mode: str | None = Field(None, pattern="^(color|image|transparent)$")
+    background_image_id: int | None = Field(None)
+    background_fit: str | None = Field(None, pattern="^(cover|contain|fill|tile)$")
     publish_status: str | None = Field(None, pattern="^(draft|published)$")
     publish_at: datetime | None = None
     layout_locked: bool | None = None
@@ -664,6 +685,10 @@ class ScreenRead(BaseModel):
     theme_accent: str | None = None
     theme_ticker_bg: str | None = None
     theme_ticker_text: str | None = None
+    theme_font: str | None = None
+    background_mode: str = "color"
+    background_image_id: int | None = None
+    background_fit: str = "cover"
     zones: list[ZoneRead] = []
     overlays: list[OverlayRead] = []
 
@@ -715,6 +740,117 @@ class PairResponse(BaseModel):
 # --------------------------------------------------------------------------- #
 # Overlay (HUD)
 # --------------------------------------------------------------------------- #
+class MediaCueBase(BaseModel):
+    """Campos comuns de um cue point sincronizado ao video (L3)."""
+
+    at_seconds: float = Field(0.0, ge=0, le=86400)
+    action: str = Field("show_gfx", max_length=16)
+    kind: str = Field("lowerthird", max_length=16)
+    content: str | None = None
+    target_id: int | None = None
+    slot_id: str = Field("cue", max_length=32)
+    anchor: str = Field("lower_third", max_length=16)
+    enter_anim: AnimKind = "slide"
+    exit_anim: AnimKind = "fade"
+    duration: float = Field(0.0, ge=0, le=86400)
+    enabled: bool = True
+
+
+class MediaCueCreate(MediaCueBase):
+    """Payload de criacao de cue point."""
+
+
+class MediaCueUpdate(BaseModel):
+    """Campos opcionais para atualizar um cue point."""
+
+    at_seconds: float | None = Field(None, ge=0, le=86400)
+    action: str | None = Field(None, max_length=16)
+    kind: str | None = Field(None, max_length=16)
+    content: str | None = None
+    target_id: int | None = None
+    slot_id: str | None = Field(None, max_length=32)
+    anchor: str | None = Field(None, max_length=16)
+    enter_anim: AnimKind | None = None
+    exit_anim: AnimKind | None = None
+    duration: float | None = Field(None, ge=0, le=86400)
+    enabled: bool | None = None
+
+
+class MediaCueRead(MediaCueBase):
+    """Cue point retornado pela API."""
+
+    id: int
+    media_id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --------------------------------------------------------------------------- #
+# Ad-breaks recorrentes/agendados (L6)
+# --------------------------------------------------------------------------- #
+class AdBreakScheduleBase(BaseModel):
+    """Campos comuns de um ad-break recorrente/agendado (L6)."""
+
+    name: str = Field("Ad-break", max_length=120)
+    screen_id: int | None = None
+    media_id: int | None = None
+    every_minutes: int = Field(15, ge=1, le=1440)
+    duration_seconds: int = Field(15, ge=1, le=86400)
+    start_time: str = Field("00:00", max_length=5)
+    end_time: str = Field("23:59", max_length=5)
+    days: str = Field("0123456", max_length=16)
+    enter_anim: AnimKind = "fade"
+    exit_anim: AnimKind = "fade"
+    enabled: bool = True
+
+    @field_validator("start_time", "end_time")
+    @classmethod
+    def _valid_hhmm(cls, v: str) -> str:
+        import re
+
+        if not re.fullmatch(r"[0-2]?\d:[0-5]\d", v or ""):
+            raise ValueError("Horario deve estar no formato HH:MM.")
+        h, m = v.split(":")
+        if int(h) > 23:
+            raise ValueError("Hora invalida (0-23).")
+        return f"{int(h):02d}:{m}"
+
+    @field_validator("days")
+    @classmethod
+    def _valid_days(cls, v: str) -> str:
+        cleaned = "".join(sorted({c for c in (v or "") if c in "0123456"}))
+        return cleaned or "0123456"
+
+
+class AdBreakScheduleCreate(AdBreakScheduleBase):
+    """Payload de criacao de ad-break agendado."""
+
+
+class AdBreakScheduleUpdate(BaseModel):
+    """Campos opcionais para atualizar um ad-break agendado."""
+
+    name: str | None = Field(None, max_length=120)
+    screen_id: int | None = None
+    media_id: int | None = None
+    every_minutes: int | None = Field(None, ge=1, le=1440)
+    duration_seconds: int | None = Field(None, ge=1, le=86400)
+    start_time: str | None = Field(None, max_length=5)
+    end_time: str | None = Field(None, max_length=5)
+    days: str | None = Field(None, max_length=16)
+    enter_anim: AnimKind | None = None
+    exit_anim: AnimKind | None = None
+    enabled: bool | None = None
+
+
+class AdBreakScheduleRead(AdBreakScheduleBase):
+    """Ad-break agendado retornado pela API."""
+
+    id: int
+    company_id: int | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class OverlayBase(BaseModel):
     """Campos comuns de um overlay (widget sobreposto estilo HUD)."""
 
@@ -730,6 +866,19 @@ class OverlayBase(BaseModel):
     opacity: float = Field(1.0, ge=0.1, le=1.0)
     z_index: int = Field(50)
     enabled: bool = True
+    # --- L1: Live Graphics --- #
+    # Ancora de posicionamento (vazio => usa `position`). Aceita as nove
+    # posicoes classicas mais `lower_third` e `fullscreen`.
+    anchor: str = Field("", max_length=16)
+    # Margem de area segura, em vmin.
+    margin: float = Field(2.0, ge=0, le=40)
+    # Animacao de entrada/saida.
+    enter_anim: AnimKind = "fade"
+    exit_anim: AnimKind = "fade"
+    # Janela de tempo (modo "timed"). 0 nos campos abaixo => usa o legado.
+    enter_at: float = Field(0.0, ge=0, le=86400)
+    duration: float = Field(0.0, ge=0, le=86400)
+    repeat_every: float = Field(0.0, ge=0, le=86400)
 
 
 class OverlayCreate(OverlayBase):
@@ -751,6 +900,14 @@ class OverlayUpdate(BaseModel):
     opacity: float | None = Field(None, ge=0.1, le=1.0)
     z_index: int | None = None
     enabled: bool | None = None
+    # --- L1: Live Graphics --- #
+    anchor: str | None = Field(None, max_length=16)
+    margin: float | None = Field(None, ge=0, le=40)
+    enter_anim: AnimKind | None = None
+    exit_anim: AnimKind | None = None
+    enter_at: float | None = Field(None, ge=0, le=86400)
+    duration: float | None = Field(None, ge=0, le=86400)
+    repeat_every: float | None = Field(None, ge=0, le=86400)
 
 
 class OverlayRead(OverlayBase):
@@ -779,6 +936,43 @@ class DisplayItem(BaseModel):
     url: str | None = None
     poster: str | None = None
     content: str | None = None
+    # L3: cue points (disparos sincronizados ao tempo do video).
+    cues: list["DisplayCue"] = []
+
+
+class DisplayCue(BaseModel):
+    """Cue point resolvido para o player (disparo por tempo de video, L3)."""
+
+    at_seconds: float
+    action: str
+    kind: str = "lowerthird"
+    content: str | None = None
+    target_id: int | None = None
+    slot_id: str = "cue"
+    anchor: str = "lower_third"
+    enter_anim: str = "slide"
+    exit_anim: str = "fade"
+    duration: float = 0.0
+    # L5 (ad-break): URL/poster da midia de anuncio resolvida no backend.
+    url: str | None = None
+    poster: str | None = None
+
+
+class DisplayAdBreak(BaseModel):
+    """Ad-break recorrente resolvido para o player (disparo por relogio, L6)."""
+
+    name: str = "Ad-break"
+    media_id: int | None = None
+    kind: str = "image"
+    url: str | None = None
+    poster: str | None = None
+    every_minutes: int = 15
+    duration_seconds: int = 15
+    start_time: str = "00:00"
+    end_time: str = "23:59"
+    days: str = "0123456"
+    enter_anim: str = "fade"
+    exit_anim: str = "fade"
 
 
 class DisplayZone(BaseModel):
@@ -791,6 +985,13 @@ class DisplayZone(BaseModel):
     width: float
     height: float
     z_index: int
+    bg_color: str | None = None
+    opacity: float = 1.0
+    radius: float = 0.0
+    padding: float = 0.0
+    border_width: float = 0.0
+    border_color: str | None = None
+    font_family: str | None = None
     playlist_name: str | None = None
     items: list[DisplayItem] = []
 
@@ -809,6 +1010,14 @@ class DisplayOverlay(BaseModel):
     visible_seconds: int = 15
     opacity: float = 1.0
     z_index: int = 50
+    # --- L1: Live Graphics --- #
+    anchor: str = ""
+    margin: float = 2.0
+    enter_anim: str = "fade"
+    exit_anim: str = "fade"
+    enter_at: float = 0.0
+    duration: float = 0.0
+    repeat_every: float = 0.0
 
 
 class DisplayPayload(BaseModel):
@@ -819,6 +1028,9 @@ class DisplayPayload(BaseModel):
     theme: dict | None = None
     zones: list[DisplayZone] = []
     overlays: list[DisplayOverlay] = []
+    # L6: ad-breaks recorrentes/agendados disparados por relogio no player.
+    ad_breaks: list[DisplayAdBreak] = []
+    background: dict | None = None
     background_audio: str | None = None
     emergency_message: str | None = None
 
@@ -834,6 +1046,8 @@ class PlayEventCreate(BaseModel):
     media_name: str = Field("", max_length=255)
     media_type: str = Field("", max_length=32)
     duration_seconds: int = Field(0, ge=0, le=86400)
+    # L5: indica que o evento e a exibicao de um anuncio (ad-break).
+    is_ad: bool = False
 
 
 class PlayEventBatch(BaseModel):
@@ -1086,7 +1300,7 @@ class ScreenGroupRead(BaseModel):
 class PlayerCommandCreate(BaseModel):
     """Comando solicitado ao player/hardware."""
 
-    command_type: str = Field(..., pattern="^(screenshot|reload|identify|power|volume|brightness|cec|shell|rs232)$")
+    command_type: str = Field(..., pattern="^(screenshot|reload|identify|power|volume|brightness|cec|shell|rs232|live_gfx|live_clear|takeover|takeover_clear)$")
     payload: dict | None = None
 
 
@@ -1118,6 +1332,75 @@ class PlayerCommandResult(BaseModel):
     data_url: str | None = Field(None, description="Imagem data URL para screenshot.")
 
 
+# --------------------------------------------------------------------------- #
+# L4: Mesa de transmissao (disparo de graficos ao vivo)
+# --------------------------------------------------------------------------- #
+class LiveGfxTrigger(BaseModel):
+    """Disparo de um grafico ao vivo (lower-third, banner, HUD) em uma tela.
+
+    Reaproveita os tipos de widget de overlay (``text``, ``news``, ``promo``,
+    ``clock`` etc.) e os mesmos atributos de posicionamento/animacao da fase
+    L1. O player aplica o grafico instantaneamente, sem recarregar a playlist.
+
+    Attributes:
+        kind: tipo de widget/grafico a renderizar.
+        content: texto (para ``text``) ou JSON de configuracao do widget.
+        name: rotulo opcional para exibicao/log.
+        slot_id: identificador logico do grafico; permite limpar um especifico.
+        anchor: ancora de posicionamento (ver L1).
+        enter_anim/exit_anim: animacoes de entrada/saida.
+        margin: margem de area segura (vmin).
+        duration: segundos visivel; ``0`` mantem ate o operador limpar.
+        width/height: tamanho em % da tela (``0`` = automatico).
+        opacity: opacidade do grafico (0.1-1).
+        z_index: camada de empilhamento.
+    """
+
+    kind: str = Field("text", max_length=32)
+    content: str = Field("", max_length=8000)
+    name: str | None = Field(None, max_length=120)
+    slot_id: str | None = Field(None, max_length=48)
+    anchor: str = Field("lower_third", max_length=16)
+    enter_anim: AnimKind = "slide"
+    exit_anim: AnimKind = "fade"
+    margin: float = Field(2.0, ge=0, le=40)
+    duration: float = Field(0.0, ge=0, le=86400)
+    width: float = Field(0.0, ge=0, le=100)
+    height: float = Field(0.0, ge=0, le=100)
+    opacity: float = Field(1.0, ge=0.1, le=1)
+    z_index: int = Field(9500, ge=0, le=99999)
+
+
+class LiveClear(BaseModel):
+    """Limpa graficos ao vivo de uma tela.
+
+    Attributes:
+        slot_id: se informado, limpa apenas o grafico desse slot; caso
+            contrario, limpa todos os graficos ao vivo da tela.
+    """
+
+    slot_id: str | None = Field(None, max_length=48)
+
+
+class LiveTakeover(BaseModel):
+    """Tomada de tela (full-screen) com mensagem destacada (ex.: ULTIMA HORA).
+
+    Attributes:
+        title: titulo em destaque (ex.: ``ULTIMA HORA``).
+        subtitle: linha de apoio opcional.
+        color: cor de fundo/realce (hex ou nome CSS).
+        enter_anim/exit_anim: animacoes de entrada/saida.
+        duration: segundos visivel; ``0`` mantem ate limpar.
+    """
+
+    title: str = Field(..., max_length=200)
+    subtitle: str | None = Field(None, max_length=400)
+    color: str = Field("#b91c1c", max_length=32)
+    enter_anim: AnimKind = "fade"
+    exit_anim: AnimKind = "fade"
+    duration: float = Field(0.0, ge=0, le=86400)
+
+
 class ScreenMapItem(ScreenHealth):
     """Item de mapa/lista de telas com dados operacionais."""
 
@@ -1145,6 +1428,8 @@ class CampaignBase(BaseModel):
     start_at: datetime | None = None
     end_at: datetime | None = None
     priority: int = 0
+    # L5: peso da rotacao ponderada entre campanhas empatadas em prioridade.
+    weight: int = Field(1, ge=0, le=1000)
     enabled: bool = True
     max_plays_per_hour: int | None = Field(None, ge=1, le=10000)
 
@@ -1171,6 +1456,7 @@ class CampaignUpdate(BaseModel):
     start_at: datetime | None = None
     end_at: datetime | None = None
     priority: int | None = None
+    weight: int | None = Field(None, ge=0, le=1000)
     enabled: bool | None = None
     max_plays_per_hour: int | None = Field(None, ge=1, le=10000)
 

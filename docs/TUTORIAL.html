@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>tvMedia Studio | Tutorial completo de uso</title>
+<meta name="description" content="Guia detalhado do tvMedia Studio: painel admin, super admin, criar telas e zonas, midias, playlists, agendamentos, graficos ao vivo, ad-breaks, relatorios e solucao de problemas."/>
+<style>
+:root{color-scheme:dark;--bg:#090d13;--bg2:#0c111b;--ink:#f5f8ff;--muted:#b5c0d6;--line:rgba(255,255,255,.14);--panel:#121a27;--teal:#10d7b1;--blue:#4f8cff;--gold:#ffd15c;--coral:#ff6f61;--ok:#3ddc84;--warn:#ffb020;--err:#ff6f61;--radius:12px;--shadow:0 20px 60px rgba(0,0,0,.45);font-family:Inter,ui-sans-serif,system-ui,"Segoe UI",Arial,sans-serif}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);line-height:1.6}
+a{color:var(--teal);text-decoration:none}a:hover{text-decoration:underline}
+img{max-width:100%}
+code,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+kbd{background:#1c2533;border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:1px 7px;font-size:13px;color:var(--ink)}
+code{background:rgba(255,255,255,.07);border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13px;color:#cfe9ff}
+.layout{display:grid;grid-template-columns:288px 1fr;gap:0;min-height:100vh}
+.side{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;border-right:1px solid var(--line);background:rgba(8,11,17,.7);padding:22px 18px}
+.side .brand{display:flex;align-items:center;gap:11px;font-weight:900;margin-bottom:18px}
+.side .brand .mk{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,var(--teal),var(--blue));color:#04110d}
+.side .brand .mk svg{width:21px;height:21px}
+.toc{list-style:none;margin:0;padding:0;font-size:14px}
+.toc li{margin:1px 0}
+.toc a{display:block;color:var(--muted);padding:7px 10px;border-radius:8px;border-left:2px solid transparent}
+.toc a:hover{background:rgba(255,255,255,.05);color:var(--ink);text-decoration:none}
+.toc a.active{background:rgba(16,215,177,.12);color:var(--ink);border-left-color:var(--teal)}
+.toc .grp{margin:16px 0 6px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#7c8aa6;padding:0 10px}
+.main{padding:0 0 80px}
+.hero{padding:64px clamp(20px,5vw,72px) 40px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,rgba(16,215,177,.10),rgba(79,140,255,.07))}
+.hero .eyebrow{color:var(--teal);font-weight:900;letter-spacing:.14em;text-transform:uppercase;font-size:12px}
+.hero h1{font-size:clamp(32px,5vw,52px);margin:12px 0 10px;line-height:1.05}
+.hero p{color:var(--muted);max-width:760px;font-size:18px;margin:0}
+.hero .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.chip{font-size:12.5px;font-weight:700;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--muted)}
+section.doc{padding:42px clamp(20px,5vw,72px);border-bottom:1px solid rgba(255,255,255,.07);max-width:1100px}
+section.doc h2{font-size:clamp(24px,3.4vw,34px);margin:0 0 6px;scroll-margin-top:20px}
+section.doc h3{font-size:20px;margin:28px 0 8px}
+section.doc p,section.doc li{color:#d4ddee}
+.lead{color:var(--muted)!important;font-size:17px;margin-bottom:8px}
+.steps{counter-reset:s;display:grid;gap:14px;margin:18px 0}
+.step{counter-increment:s;position:relative;padding:16px 18px 16px 60px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius)}
+.step::before{content:counter(s);position:absolute;left:16px;top:16px;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--gold);color:#151100;font-weight:900}
+.step b{color:#fff}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin:16px 0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+.card h4{margin:0 0 6px;font-size:16px;display:flex;align-items:center;gap:8px}
+.card p{margin:0;color:var(--muted);font-size:14px}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;background:var(--teal)}
+.callout{display:flex;gap:12px;padding:14px 16px;border-radius:var(--radius);border:1px solid var(--line);margin:16px 0;background:var(--bg2)}
+.callout .i{flex:none;width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-weight:900}
+.callout.tip{border-color:rgba(61,220,132,.4)}.callout.tip .i{background:rgba(61,220,132,.18);color:var(--ok)}
+.callout.warn{border-color:rgba(255,176,32,.4)}.callout.warn .i{background:rgba(255,176,32,.18);color:var(--warn)}
+.callout.note{border-color:rgba(79,140,255,.4)}.callout.note .i{background:rgba(79,140,255,.18);color:var(--blue)}
+.callout p{margin:0;font-size:14.5px}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+th,td{text-align:left;padding:10px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:rgba(255,255,255,.04);font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;color:#9fb0cc}
+tr:last-child td{border-bottom:0}
+.role{font-weight:800;white-space:nowrap}
+.badge{display:inline-block;font-size:11px;font-weight:800;padding:2px 8px;border-radius:6px;background:rgba(16,215,177,.16);color:var(--teal);margin-left:6px}
+.badge.novo{background:rgba(255,209,92,.18);color:var(--gold)}
+/* ---- Mockups ---- */
+.mock{border:1px solid var(--line);border-radius:14px;background:#0b0f17;box-shadow:var(--shadow);padding:14px;margin:18px 0}
+.mock .bar{display:flex;align-items:center;gap:7px;margin-bottom:12px}
+.mock .bar i{width:11px;height:11px;border-radius:50%;background:#33405a;display:inline-block}
+.mock .bar i:nth-child(1){background:var(--coral)}.mock .bar i:nth-child(2){background:var(--gold)}.mock .bar i:nth-child(3){background:var(--ok)}
+.mock .bar span{margin-left:8px;font-size:12px;color:var(--muted)}
+.admin-ui{display:grid;grid-template-columns:150px 1fr 200px;gap:10px;min-height:300px}
+.admin-ui .col{background:#121a27;border:1px solid var(--line);border-radius:9px;padding:11px}
+.admin-ui .navi{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:7px}
+.admin-ui .navi b{color:#fff}
+.admin-ui .navi .on{background:rgba(16,215,177,.14);color:var(--ink);border-radius:7px;padding:6px 8px;font-weight:700}
+.admin-ui .navi a{padding:6px 8px;color:var(--muted)}
+.canvas{position:relative;background:repeating-linear-gradient(45deg,#0c1320,#0c1320 10px,#0e1626 10px,#0e1626 20px);border-radius:8px;aspect-ratio:16/9;border:1px solid var(--line);overflow:hidden}
+.zone{position:absolute;border:1.5px dashed rgba(16,215,177,.8);background:linear-gradient(135deg,rgba(16,215,177,.22),rgba(79,140,255,.14));border-radius:7px;display:grid;place-items:center;font-size:12px;font-weight:800;color:#eafff8;text-align:center;padding:4px}
+.ln{height:9px;border-radius:999px;background:rgba(255,255,255,.13);margin:8px 0}
+.ln.s{width:55%}.ln.m{width:75%}
+.tv{aspect-ratio:16/9;background:#05070c;border:6px solid #1a2233;border-radius:12px;position:relative;overflow:hidden;box-shadow:var(--shadow)}
+.tv .gfx{position:absolute;left:5%;bottom:8%;background:linear-gradient(135deg,rgba(16,215,177,.95),rgba(79,140,255,.92));color:#04110d;padding:8px 14px;border-radius:8px;font-weight:800;max-width:60%}
+.tv .gfx small{display:block;font-weight:600;color:#06251f}
+.tv .ad{position:absolute;inset:0;background:#000;display:grid;place-items:center;color:#fff}
+.tv .ad .tag{position:absolute;top:10px;right:10px;background:var(--coral);color:#fff;font-size:11px;font-weight:800;padding:3px 9px;border-radius:6px}
+.timeline{height:40px;background:#0e1626;border:1px solid var(--line);border-radius:8px;position:relative;margin:10px 0}
+.timeline .mk{position:absolute;top:6px;bottom:6px;width:3px;border-radius:2px}
+.timeline .mk.b{background:var(--blue)}.timeline .mk.r{background:var(--coral)}.timeline .mk.g{background:#7c8aa6}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0}
+.fake-input{background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:13px;color:var(--muted)}
+.fake-input b{color:#fff;display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;color:#9fb0cc}
+.days{display:flex;gap:5px;flex-wrap:wrap}
+.days span{font-size:12px;padding:5px 9px;border-radius:7px;border:1px solid var(--line);color:var(--muted)}
+.days span.on{background:rgba(16,215,177,.16);color:var(--teal);border-color:rgba(16,215,177,.5);font-weight:700}
+.kbds{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0}
+.top{position:fixed;right:18px;bottom:18px;width:44px;height:44px;border-radius:50%;background:var(--panel);border:1px solid var(--line);display:grid;place-items:center;color:var(--ink);box-shadow:var(--shadow)}
+footer{padding:30px clamp(20px,5vw,72px);color:var(--muted);font-size:14px}
+@media(max-width:960px){.layout{grid-template-columns:1fr}.side{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.admin-ui{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="side">
+    <div class="brand"><span class="mk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4M7 9h6"/></svg></span><span>tvMedia Studio</span></div>
+    <nav>
+      <ul class="toc" id="toc">
+        <li class="grp">Comecando</li>
+        <li><a href="#conceitos">1. Conceitos principais</a></li>
+        <li><a href="#papeis">2. Papeis de acesso</a></li>
+        <li><a href="#painel">3. O painel por dentro</a></li>
+        <li class="grp">Montando conteudo</li>
+        <li><a href="#telas">4. Criar tela e zonas</a></li>
+        <li><a href="#midias">5. Midias e links</a></li>
+        <li><a href="#widgets">6. Widgets e tickers</a></li>
+        <li><a href="#datasets">7. DataSets e menu boards</a></li>
+        <li><a href="#playlists">8. Playlists</a></li>
+        <li><a href="#agendamentos">9. Agendamentos</a></li>
+        <li><a href="#publicar">10. Publicar na TV</a></li>
+        <li class="grp">Ao vivo e anuncios</li>
+        <li><a href="#aovivo">11. Graficos ao vivo (CG)</a></li>
+        <li><a href="#cues">12. Timeline de cues</a></li>
+        <li><a href="#adbreaks">13. Ad-breaks recorrentes</a></li>
+        <li class="grp">Operacao</li>
+        <li><a href="#comandos">14. Comandos e saude</a></li>
+        <li><a href="#relatorios">15. Relatorios e BI</a></li>
+        <li><a href="#superadmin">16. Super admin</a></li>
+        <li><a href="#usuarios">17. Usuarios e seguranca</a></li>
+        <li><a href="#observabilidade">18. Observabilidade</a></li>
+        <li class="grp">Ajuda</li>
+        <li><a href="#problemas">19. Solucao de problemas</a></li>
+        <li><a href="#faq">20. Perguntas frequentes</a></li>
+      </ul>
+    </nav>
+  </aside>
+  <main class="main">
+    <header class="hero">
+      <div class="eyebrow">Documentacao &middot; Guia de uso</div>
+      <h1>Tutorial completo do tvMedia Studio</h1>
+      <p>Tudo o que voce precisa para operar o sistema de ponta a ponta: do primeiro acesso ate graficos ao vivo, anuncios programados e relatorios. Com exemplos visuais de cada tela.</p>
+      <div class="chips"><span class="chip">Painel admin</span><span class="chip">Super admin</span><span class="chip">Telas e zonas</span><span class="chip">Playlists</span><span class="chip">Graficos ao vivo</span><span class="chip">Ad-breaks</span><span class="chip">Relatorios</span></div>
+    </header>
+    <section class="doc" id="conceitos">
+      <h2>1. Conceitos principais</h2>
+      <p class="lead">Antes de operar, entenda como as pecas se encaixam. Todo o resto do sistema gira em torno destes conceitos.</p>
+      <div class="cards">
+        <div class="card"><h4><span class="dot"></span> Empresa</h4><p>O espaco isolado de um cliente. Cada empresa tem suas telas, midias, playlists e usuarios. O sistema e multiempresa.</p></div>
+        <div class="card"><h4><span class="dot"></span> Tela</h4><p>Representa uma TV/monitor fisico. Tem um <code>slug</code> (link unico) que o player abre no navegador da TV.</p></div>
+        <div class="card"><h4><span class="dot"></span> Zona</h4><p>Uma area retangular dentro da tela. Voce desenha zonas no canvas e cada uma exibe uma playlist.</p></div>
+        <div class="card"><h4><span class="dot"></span> Midia</h4><p>Cada conteudo: imagem, video, link (YouTube/web), PDF, audio ou widget (relogio, clima, etc.).</p></div>
+        <div class="card"><h4><span class="dot"></span> Playlist</h4><p>A sequencia de midias que toca em loop numa zona, com duracao, transicao, ajuste e audio por item.</p></div>
+        <div class="card"><h4><span class="dot"></span> Agendamento</h4><p>Regra de quando cada playlist toca em cada zona (horario/dia da semana).</p></div>
+        <div class="card"><h4><span class="dot"></span> Campanha</h4><p>Agrupa midias com periodo de validade, util para promocoes sazonais.</p></div>
+        <div class="card"><h4><span class="dot"></span> Player</h4><p>A pagina aberta na TV. Recebe atualizacoes ao vivo do painel via WebSocket, sem recarregar.</p></div>
+      </div>
+      <div class="callout note"><span class="i">i</span><p>Fluxo mental: <b>Empresa &rarr; Tela &rarr; Zonas &rarr; Playlists (com midias) &rarr; Agendamentos &rarr; Publicar</b>. O player na TV apenas consome o resultado.</p></div>
+    </section>
+
+    <section class="doc" id="papeis">
+      <h2>2. Papeis de acesso</h2>
+      <p class="lead">O sistema tem papeis por empresa e um nivel global (super admin). Cada papel define o que o usuario pode fazer.</p>
+      <table>
+        <tr><th>Papel</th><th>Pode fazer</th><th>Tipico para</th></tr>
+        <tr><td class="role">Super admin <span class="badge">global</span></td><td>Gerencia <b>todas as empresas</b>, cria empresas, define branding/templates e pode personificar uma empresa para dar suporte.</td><td>Dono da operacao / provedor</td></tr>
+        <tr><td class="role">Admin</td><td>Controle total <b>dentro da empresa</b>: telas, midias, playlists, agendamentos, usuarios e relatorios.</td><td>Gestor do cliente</td></tr>
+        <tr><td class="role">Editor</td><td>Cria e edita conteudo (midias, playlists, telas), mas nao gerencia usuarios.</td><td>Operador de conteudo</td></tr>
+        <tr><td class="role">Viewer</td><td>Somente leitura: visualiza telas e relatorios, sem alterar nada.</td><td>Acompanhamento / auditoria</td></tr>
+      </table>
+      <div class="callout tip"><span class="i">+</span><p>O super admin escolhe a empresa que esta operando no topo do painel. As acoes passam a valer para aquela empresa ate ele trocar.</p></div>
+    </section>
+
+    <section class="doc" id="painel">
+      <h2>3. O painel por dentro</h2>
+      <p class="lead">O painel admin tem tres areas: a <b>navegacao</b> (esquerda), o <b>palco/canvas</b> (centro) e o <b>inspetor</b> (direita), onde voce edita o item selecionado.</p>
+      <div class="mock"><div class="bar"><i></i><i></i><i></i><span>tvMedia Studio &mdash; painel admin</span></div>
+        <div class="admin-ui">
+          <div class="col navi"><b>Menu</b><span class="on">Telas</span><a>Midias</a><a>Playlists</a><a>Agendamentos</a><a>Relatorios</a><a>Saude das telas</a></div>
+          <div class="col"><div style="font-size:12px;color:var(--muted);margin-bottom:8px">Canvas da tela (zonas)</div>
+            <div class="canvas"><div class="zone" style="left:4%;top:6%;width:60%;height:60%">Campanha principal</div><div class="zone" style="left:66%;top:6%;width:30%;height:60%">Noticias</div><div class="zone" style="left:4%;top:70%;width:92%;height:24%">Ticker de promocoes</div></div>
+          </div>
+          <div class="col"><b style="font-size:13px">Inspetor</b><div class="ln m"></div><div class="ln s"></div><div class="ln"></div><div class="ln m"></div><div class="ln s"></div></div>
+        </div>
+      </div>
+      <h3>Atalhos que economizam tempo</h3>
+      <div class="kbds"><kbd>Ctrl</kbd>+<kbd>K</kbd> &rarr; abre a <b>paleta de comandos</b> (ir para qualquer secao ou acao).</div>
+      <ul>
+        <li><b>Paleta de comandos:</b> nova tela, nova playlist, pre-visualizar player, saude das telas, relatorios, ad-breaks, guia de uso, alternar tema e sair.</li>
+        <li><b>Guia de uso:</b> um tour interativo aparece no primeiro acesso; reabra pela paleta procurando por <i>"Abrir guia de uso"</i>.</li>
+        <li><b>Tema claro/escuro:</b> alterna pelo comando <i>"Alternar tema"</i>.</li>
+      </ul>
+    </section>
+
+    <section class="doc" id="telas">
+      <h2>4. Criar uma tela e desenhar zonas</h2>
+      <p class="lead">A tela e o ponto de partida. Voce cria a tela, desenha as zonas no canvas e pega o link do player para abrir na TV.</p>
+      <div class="steps">
+        <div class="step"><b>Crie a tela.</b> Em <b>Telas</b>, clique em <b>Nova tela</b> (ou <kbd>Ctrl</kbd>+<kbd>K</kbd> &rarr; "Nova tela"). De um nome (ex.: "Balcao - Loja Centro") e defina resolucao/orientacao (horizontal ou vertical).</div>
+        <div class="step"><b>Desenhe as zonas.</b> No canvas, arraste para criar uma zona e redimensione pelas bordas. Use uma zona para tela cheia, ou varias (ex.: campanha + noticias + ticker). Da para duplicar e excluir zonas pelo inspetor.</div>
+        <div class="step"><b>Ligue uma playlist a cada zona.</b> Selecione a zona e, no inspetor, escolha a <b>playlist padrao</b> que toca ali.</div>
+        <div class="step"><b>Pegue o link do player.</b> No inspetor da tela ha o <b>Link do player (TV)</b> no formato <code>/player/?screen=SLUG</code>. Copie e abra na TV.</div>
+        <div class="step"><b>Publique.</b> Use <b>Publicar agora</b>, deixe como <b>Rascunho</b> ou agende a publicacao para uma data/hora.</div>
+      </div>
+      <div class="callout tip"><span class="i">+</span><p><b>Grupo de sincronia:</b> telas no mesmo grupo (ex.: <code>vitrine-loja1</code>) recarregam juntas quando uma e atualizada. Ideal para video-wall ou varias TVs lado a lado.</p></div>
+      <div class="callout note"><span class="i">i</span><p><b>Emparelhamento:</b> quando disponivel, a tela mostra um <b>codigo de emparelhamento</b> para vincular o dispositivo da TV com seguranca, sem digitar URL.</p></div>
+    </section>
+
+    <section class="doc" id="midias">
+      <h2>5. Midias e links</h2>
+      <p class="lead">Em <b>Midias</b> ficam todos os conteudos reaproveitaveis. Voce envia arquivos ou cadastra links.</p>
+      <table>
+        <tr><th>Tipo</th><th>Como adicionar</th><th>Observacoes</th></tr>
+        <tr><td><b>Imagem</b></td><td>Upload do computador (JPG, PNG, etc.)</td><td>Defina o ajuste (cobrir/conter) na playlist.</td></tr>
+        <tr><td><b>Video</b></td><td>Upload de arquivo MP4/WebM.</td><td>Pode tocar inteiro ou por tempo fixo; suporta som por item.</td></tr>
+        <tr><td><b>YouTube</b></td><td>Cole o link: <code>youtube.com/watch?v=...</code>, <code>youtu.be/...</code>, shorts ou playlist.</td><td>O sistema converte para embed com autoplay e loop. Veja a secao 19 se aparecer "video indisponivel".</td></tr>
+        <tr><td><b>Pagina web / Embed</b></td><td>URL de um site ou conteudo incorporavel (ex.: Spotify).</td><td>Exibido dentro de um iframe na zona.</td></tr>
+        <tr><td><b>Ao vivo (HLS)</b></td><td>URL de stream <code>.m3u8</code>.</td><td>RTSP precisa de um gateway que converta para HLS.</td></tr>
+        <tr><td><b>PDF</b></td><td>URL/arquivo PDF.</td><td>Bom para cardapios e tabelas estaticas.</td></tr>
+        <tr><td><b>Audio</b></td><td>Arquivo ou link de musica.</td><td>Toca como trilha; pode ser "texto com musica de fundo".</td></tr>
+      </table>
+      <div class="callout warn"><span class="i">!</span><p>Para autoplay confiavel nas TVs, videos e YouTube comecam <b>sem som</b> por padrao. Ative o audio item a item apenas onde fizer sentido (e cuidado para nao sobrepor varias zonas com som).</p></div>
+    </section>
+
+    <section class="doc" id="widgets">
+      <h2>6. Widgets e tickers</h2>
+      <p class="lead">Alem de arquivos, o tvMedia gera conteudo dinamico. Adicione pela secao Midias ou clicando com o botao direito numa zona.</p>
+      <div class="cards">
+        <div class="card"><h4>Relogio / Relogio mundial</h4><p>Hora local ou de varios fusos.</p></div>
+        <div class="card"><h4>Clima</h4><p>Automatico pela cidade configurada.</p></div>
+        <div class="card"><h4>Ticker de noticias</h4><p>RSS + mensagens proprias rolando na faixa.</p></div>
+        <div class="card"><h4>Ticker de promocoes</h4><p>Ofertas em rotacao continua.</p></div>
+        <div class="card"><h4>Contagem regressiva</h4><p>Para lancamentos, ofertas e eventos.</p></div>
+        <div class="card"><h4>QR Code</h4><p>Leve o cliente ao cardapio, wifi ou promocao.</p></div>
+        <div class="card"><h4>Cotacoes / Acoes</h4><p>Indicadores financeiros atualizados.</p></div>
+        <div class="card"><h4>Calendario</h4><p>Agenda e proximos eventos.</p></div>
+        <div class="card"><h4>Menu board / DataSet</h4><p>Cardapio dinamico a partir de uma tabela (veja a proxima secao).</p></div>
+      </div>
+    </section>
+
+    <section class="doc" id="datasets">
+      <h2>7. DataSets e menu boards</h2>
+      <p class="lead">Um <b>DataSet</b> e uma tabela de dados (ex.: itens do cardapio com nome, preco e categoria). O <b>menu board</b> usa esse DataSet para montar a tela automaticamente.</p>
+      <div class="steps">
+        <div class="step"><b>Crie o DataSet</b> com as colunas que precisa (ex.: Produto, Preco, Categoria).</div>
+        <div class="step"><b>Preencha as linhas</b> (os itens). Quando voce muda um preco aqui, todas as telas que usam esse DataSet atualizam.</div>
+        <div class="step"><b>Use num menu board / widget</b> para exibir a tabela formatada na tela.</div>
+      </div>
+      <div class="callout tip"><span class="i">+</span><p>Ideal para redes: altere o preco uma vez no DataSet e todas as unidades que consomem aquela tabela refletem a mudanca.</p></div>
+    </section>
+
+    <section class="doc" id="playlists">
+      <h2>8. Playlists</h2>
+      <p class="lead">A playlist e a sequencia que toca em loop numa zona. Cada item tem ajustes proprios.</p>
+      <table>
+        <tr><th>Ajuste por item</th><th>O que faz</th></tr>
+        <tr><td><b>Duracao</b></td><td>Quantos segundos o item fica na tela (para imagens/widgets).</td></tr>
+        <tr><td><b>Tocar completo</b></td><td>Para video/audio/YouTube: toca ate o fim em vez de tempo fixo.</td></tr>
+        <tr><td><b>Transicao</b></td><td>Efeito ao trocar de item (fade, etc.).</td></tr>
+        <tr><td><b>Ajuste (fit)</b></td><td><i>Cobrir</i> (preenche, pode cortar) ou <i>Conter</i> (mostra inteiro, pode deixar bordas).</td></tr>
+        <tr><td><b>Audio</b></td><td>Silenciar ou tocar com som.</td></tr>
+        <tr><td><b>Validade / campanha</b></td><td>Item entra/sai automaticamente conforme o periodo.</td></tr>
+      </table>
+      <div class="steps">
+        <div class="step"><b>Crie a playlist</b> em <b>Playlists</b> &rarr; Nova playlist.</div>
+        <div class="step"><b>Adicione midias</b> (reordene arrastando) e ajuste duracao/fit/audio de cada uma.</div>
+        <div class="step"><b>Ligue a playlist a uma zona</b> na tela (secao 4).</div>
+      </div>
+    </section>
+
+    <section class="doc" id="agendamentos">
+      <h2>9. Agendamentos</h2>
+      <p class="lead">Quer conteudo diferente por horario ou dia? Os agendamentos definem <b>quando</b> cada playlist toca em cada zona.</p>
+      <ul>
+        <li>Sem agendamento, a zona usa sua <b>playlist padrao</b> o tempo todo.</li>
+        <li>Com agendamento, voce define janelas (ex.: cardapio de almoco das 11h-15h; happy hour das 18h-20h).</li>
+        <li>Funciona por dia da semana, util para promocoes recorrentes.</li>
+      </ul>
+      <div class="callout note"><span class="i">i</span><p>Os agendamentos respeitam o fuso configurado na empresa, entao a troca acontece no horario local da loja.</p></div>
+    </section>
+
+    <section class="doc" id="publicar">
+      <h2>10. Publicar na TV</h2>
+      <p class="lead">Com a tela montada, e hora de colocar no ar.</p>
+      <div class="steps">
+        <div class="step"><b>Abra o link do player</b> (<code>/player/?screen=SLUG</code>) no navegador da TV, mini PC, Android box ou Raspberry Pi. Coloque em tela cheia.</div>
+        <div class="step"><b>Ou pre-visualize</b> pelo painel: o comando <i>"Pre-visualizar player"</i> abre um espelho ao vivo embutido.</div>
+        <div class="step"><b>Edite a vontade.</b> Qualquer mudanca no painel chega na TV <b>ao vivo</b>, via WebSocket, sem recarregar a pagina.</div>
+      </div>
+      <div class="callout warn"><span class="i">!</span><p>Sirva o sistema sob <b>HTTPS</b> em producao. Navegadores de TV e os service workers (cache offline) exigem origem segura para funcionar bem.</p></div>
+    </section>
+    <section class="doc" id="aovivo">
+      <h2>11. Graficos ao vivo (CG)</h2>
+      <p class="lead">Dispare elementos na tela em tempo real, como numa transmissao de TV: lower-thirds, titulos e tomadas de tela cheia (takeover).</p>
+      <div class="mock"><div class="bar"><i></i><i></i><i></i><span>Player na TV &mdash; lower-third ao vivo</span></div>
+        <div class="tv"><div class="gfx">PROMOCAO RELAMPAGO<small>Chopp em dobro ate as 20h</small></div></div>
+      </div>
+      <ul>
+        <li><b>Lower-third:</b> faixa com titulo/subtitulo sobre o conteudo atual, com posicao e cor configuraveis.</li>
+        <li><b>Takeover:</b> assume a tela inteira com um aviso (ex.: "ULTIMA HORA").</li>
+        <li><b>Limpar (live clear):</b> remove o grafico ativo e volta a programacao.</li>
+      </ul>
+      <div class="callout tip"><span class="i">+</span><p>Os disparos sao por tela ou para varias telas de uma vez, e ficam registrados na auditoria (quem disparou e quando).</p></div>
+    </section>
+
+    <section class="doc" id="cues">
+      <h2>12. Timeline visual de cues <span class="badge novo">novo</span></h2>
+      <p class="lead">Para midias de video, voce marca <b>cues</b> (gatilhos) no tempo exato em que um grafico deve aparecer, com pre-visualizacao ao vivo de como ficara na tela.</p>
+      <div class="mock"><div class="bar"><i></i><i></i><i></i><span>Editor de cues &mdash; palco + linha do tempo</span></div>
+        <div class="tv" style="margin-bottom:10px"><div class="gfx">Joao Silva<small>Gerente de vendas</small></div></div>
+        <div class="timeline"><div class="mk b" style="left:18%"></div><div class="mk b" style="left:42%"></div><div class="mk r" style="left:67%"></div><div class="mk g" style="left:85%"></div></div>
+        <div style="font-size:12px;color:var(--muted)">Clique na linha do tempo para marcar o instante. Cada marcador e um cue (azul = mostrar grafico, vermelho = anuncio, cinza = limpar).</div>
+      </div>
+      <div class="steps">
+        <div class="step"><b>Abra a midia de video</b> e o editor de cues.</div>
+        <div class="step"><b>Clique na linha do tempo</b> no instante desejado (ou informe os segundos).</div>
+        <div class="step"><b>Escolha a acao:</b> mostrar grafico (lower-third), limpar ou ad-break. Ajuste titulo/cor/posicao e veja o resultado no palco.</div>
+        <div class="step"><b>Salve.</b> Na TV, o grafico dispara automaticamente quando o video atinge aquele tempo (evento <code>timeupdate</code>), igual em qualquer tela.</div>
+      </div>
+    </section>
+
+    <section class="doc" id="adbreaks">
+      <h2>13. Ad-breaks recorrentes <span class="badge novo">novo</span></h2>
+      <p class="lead">Anuncios em tela cheia que entram sozinhos por horario, sem ninguem mexer na TV. Eles sobrepoem a programacao pela duracao configurada e devolvem o controle automaticamente.</p>
+      <div class="mock"><div class="bar"><i></i><i></i><i></i><span>Player na TV &mdash; ad-break em tela cheia</span></div>
+        <div class="tv"><div class="ad"><span class="tag">ANUNCIO</span><div style="text-align:center"><div style="font-weight:800;font-size:18px">Oferta do dia</div><small style="color:#9fb0cc">15s &middot; volta a programacao em seguida</small></div></div></div>
+      </div>
+      <h3>Como configurar</h3>
+      <p>Pela paleta de comandos (<kbd>Ctrl</kbd>+<kbd>K</kbd>) procure por <i>"Ad-breaks agendados"</i> e crie um agendamento:</p>
+      <div class="mock"><div class="bar"><i></i><i></i><i></i><span>Novo ad-break agendado</span></div>
+        <div class="form-row"><div class="fake-input"><b>Nome</b>Oferta do dia</div><div class="fake-input"><b>Midia</b>banner-oferta.mp4</div></div>
+        <div class="form-row"><div class="fake-input"><b>A cada (min)</b>15</div><div class="fake-input"><b>Duracao (s)</b>15</div></div>
+        <div class="form-row"><div class="fake-input"><b>Inicio</b>09:00</div><div class="fake-input"><b>Fim</b>21:00</div></div>
+        <div class="fake-input" style="margin:8px 0"><b>Tela</b>Todas as telas da empresa</div>
+        <div class="fake-input"><b>Dias</b><div class="days" style="margin-top:6px"><span class="on">Seg</span><span class="on">Ter</span><span class="on">Qua</span><span class="on">Qui</span><span class="on">Sex</span><span>Sab</span><span>Dom</span></div></div>
+      </div>
+      <table>
+        <tr><th>Campo</th><th>O que faz</th></tr>
+        <tr><td><b>A cada (min)</b></td><td>Cadencia do disparo (ex.: a cada 15 minutos).</td></tr>
+        <tr><td><b>Duracao (s)</b></td><td>Quanto tempo o anuncio fica em tela cheia.</td></tr>
+        <tr><td><b>Inicio / Fim</b></td><td>Janela diaria em que os disparos acontecem.</td></tr>
+        <tr><td><b>Dias</b></td><td>Dias da semana ativos (Seg a Dom).</td></tr>
+        <tr><td><b>Tela</b></td><td>Uma tela especifica ou todas da empresa.</td></tr>
+      </table>
+      <div class="callout tip"><span class="i">+</span><p>Durante o anuncio, o video de fundo e pausado e retomado ao final. Os disparos contam no <b>relatorio de anuncios</b> (proof-of-play marcado como anuncio).</p></div>
+    </section>
+
+    <section class="doc" id="comandos">
+      <h2>14. Comandos de tela e saude</h2>
+      <p class="lead">Gerencie os dispositivos remotamente e acompanhe quais telas estao online.</p>
+      <div class="cards">
+        <div class="card"><h4>Screenshot</h4><p>Captura o que esta na tela agora (best-effort).</p></div>
+        <div class="card"><h4>Recarregar / Identificar</h4><p>Forca reload ou pisca a tela para localiza-la.</p></div>
+        <div class="card"><h4>Power / Volume / Brilho</h4><p>Controles de energia e ajuste, quando o hardware suporta.</p></div>
+        <div class="card"><h4>CEC / RS-232 / Shell</h4><p>Comandos avancados para integracao com TVs e players gerenciados.</p></div>
+      </div>
+      <h3>Saude das telas</h3>
+      <p>Pela paleta, abra <i>"Saude das telas"</i> para ver status online/offline e um mapa/lista operacional. Telas offline ajudam a detectar problemas de rede ou energia rapidamente.</p>
+    </section>
+
+    <section class="doc" id="relatorios">
+      <h2>15. Relatorios, BI e proof-of-play</h2>
+      <p class="lead">O sistema registra o que tocou em cada tela e gera provas de exibicao.</p>
+      <ul>
+        <li><b>Proof-of-play:</b> historico do que foi exibido, com data/hora e tela.</li>
+        <li><b>BI / exportacao:</b> visualize e exporte os dados em CSV (janelas de 7, 30 ou 90 dias).</li>
+        <li><b>Relatorio de anuncios:</b> foca nos ad-breaks (quantas vezes cada anuncio tocou).</li>
+        <li><b>Relatorios por e-mail:</b> agende envios automaticos (ex.: semanal) quando o SMTP esta configurado.</li>
+      </ul>
+      <div class="callout note"><span class="i">i</span><p>Para clientes que precisam prestar contas (ex.: anunciantes pagantes), o proof-of-play e a comprovacao de que o conteudo realmente foi ao ar.</p></div>
+    </section>
+
+    <section class="doc" id="superadmin">
+      <h2>16. Super admin: empresas, branding e templates</h2>
+      <p class="lead">O super admin opera acima das empresas. E onde voce administra a operacao como um todo e da suporte aos clientes.</p>
+      <div class="mock"><div class="bar"><i></i><i></i><i></i><span>Visao do super admin</span></div>
+        <div class="admin-ui">
+          <div class="col navi"><b>Global</b><span class="on">Visao geral</span><a>Empresas</a><a>Branding</a><a>Templates</a></div>
+          <div class="col"><div style="font-size:12px;color:var(--muted);margin-bottom:8px">Empresas</div><div class="ln m"></div><div class="ln"></div><div class="ln s"></div><div class="ln m"></div></div>
+          <div class="col"><b style="font-size:13px">Detalhe</b><div class="ln"></div><div class="ln s"></div><div class="ln m"></div></div>
+        </div>
+      </div>
+      <ul>
+        <li><b>Empresas:</b> crie e gerencie cada cliente (espaco isolado de dados).</li>
+        <li><b>Branding:</b> defina identidade visual por empresa.</li>
+        <li><b>Templates:</b> modelos de tela/playlist reutilizaveis entre empresas.</li>
+        <li><b>Personificar empresa:</b> o super admin escolhe uma empresa para operar e dar suporte como se fosse o admin dela.</li>
+      </ul>
+    </section>
+
+    <section class="doc" id="usuarios">
+      <h2>17. Usuarios e seguranca</h2>
+      <p class="lead">Cada empresa tem seus usuarios e papeis (secao 2). A seguranca cobre autenticacao e integracoes.</p>
+      <ul>
+        <li><b>Usuarios e papeis:</b> convide pessoas e defina admin/editor/viewer.</li>
+        <li><b>2FA:</b> autenticacao em duas etapas para proteger o acesso.</li>
+        <li><b>Tokens de API:</b> para integracoes externas e automacoes.</li>
+        <li><b>Auditoria:</b> trilha de quem fez o que (alteracoes e disparos ao vivo).</li>
+      </ul>
+      <div class="callout warn"><span class="i">!</span><p>Em producao, defina uma <code>SECRET_KEY</code> forte, ative 2FA para admins e sirva tudo sob HTTPS. Consulte <code>docs/DEPLOY_PRODUCAO.md</code>.</p></div>
+    </section>
+
+    <section class="doc" id="observabilidade">
+      <h2>18. Observabilidade, retencao e backup</h2>
+      <ul>
+        <li><b>Metricas:</b> endpoint de observabilidade para acompanhar a saude do servico.</li>
+        <li><b>Retencao:</b> os eventos de exibicao (play events) tem limpeza configuravel para o banco nao crescer indefinidamente.</li>
+        <li><b>Backups:</b> faca backup regular do banco e da pasta de midias.</li>
+        <li><b>Indicador de conexao:</b> o player mostra quando perde/reconecta ao servidor.</li>
+      </ul>
+    </section>
+
+    <section class="doc" id="problemas">
+      <h2>19. Solucao de problemas</h2>
+
+      <h3>"Video indisponivel" ao adicionar um YouTube</h3>
+      <p>Esse aviso e do <b>proprio player do YouTube</b>, nao do tvMedia. O sistema converte o link corretamente para embed (testado para <code>watch?v=</code>, <code>youtu.be</code>, shorts, playlists e ID puro). As causas mais comuns sao, em ordem:</p>
+      <table>
+        <tr><th>Causa</th><th>Como confirmar / resolver</th></tr>
+        <tr><td><b>O dono do video desativou a incorporacao</b> (embedding) em outros sites.</td><td>Mais comum. Teste com <b>outro video</b> publico que permita incorporacao. Se o outro funciona, era restricao do dono.</td></tr>
+        <tr><td><b>Video com restricao</b> de idade, regiao ou direitos autorais.</td><td>Esses videos costumam bloquear o embed. Use uma midia propria ou outro video.</td></tr>
+        <tr><td><b>Video privado, removido ou link errado.</b></td><td>Abra o link direto no navegador para confirmar que ele toca normalmente.</td></tr>
+        <tr><td><b>O dispositivo da TV nao alcanca o YouTube.</b></td><td>Verifique internet/firewall/proxy do player. Conteudo proprio (upload) nao depende do YouTube.</td></tr>
+        <tr><td><b>Pagina servida fora de HTTPS</b> em alguns ambientes.</td><td>Sirva o sistema sob HTTPS (recomendado de qualquer forma).</td></tr>
+      </table>
+      <div class="callout tip"><span class="i">+</span><p><b>Teste rapido:</b> cadastre um video diferente e claramente publico. Se ele aparece, o problema era o video original (restricao do dono), nao o sistema. Para conteudo critico, prefira <b>subir o video</b> direto na secao Midias: assim nao depende de politicas do YouTube.</p></div>
+
+      <h3>A TV nao atualiza sozinha</h3>
+      <p>Confirme que a tela esta <b>publicada</b> (nao em rascunho) e que o player esta com o link correto (<code>/player/?screen=SLUG</code>). O indicador de conexao mostra se ha comunicacao com o servidor.</p>
+      <h3>Video/YouTube nao toca com som</h3>
+      <p>Por padrao o autoplay e mudo (exigencia dos navegadores). Ative o audio no item da playlist, mas evite varias zonas com som ao mesmo tempo.</p>
+      <h3>Conteudo cortado ou com bordas</h3>
+      <p>Ajuste o <b>fit</b> do item: <i>Cobrir</i> preenche a zona (pode cortar) e <i>Conter</i> mostra inteiro (pode deixar bordas).</p>
+    </section>
+
+    <section class="doc" id="faq">
+      <h2>20. Perguntas frequentes</h2>
+      <h3>Preciso de uma TV especial?</h3>
+      <p>Nao. O player roda no navegador; uma TV com navegador, mini PC, Android box ou Raspberry Pi costuma bastar.</p>
+      <h3>Consigo usar em varias unidades?</h3>
+      <p>Sim. O sistema e multiempresa, com grupos de telas e organizacao por playlists e campanhas.</p>
+      <h3>Como ofereco uma demo para um cliente?</h3>
+      <p>Tres formas: (1) <b>demo guiada ao vivo</b> numa call, mostrando o painel e uma tela de exemplo; (2) uma <b>tela de demonstracao</b> com link de player que abre em qualquer navegador; ou (3) um <b>piloto</b> com uma tela real do cliente por um periodo.</p>
+      <h3>Como reabro o guia rapido do painel?</h3>
+      <p>Pressione <kbd>Ctrl</kbd>+<kbd>K</kbd> e procure por <i>"Abrir guia de uso"</i>.</p>
+    </section>
+
+    <footer>
+      <p>tvMedia Studio &mdash; Tutorial de uso. Gerado para apoiar a operacao do painel admin, super admin e player. Para deploy em producao, consulte <code>docs/DEPLOY_PRODUCAO.md</code>.</p>
+    </footer>
+  </main>
+</div>
+<a class="top" href="#" aria-label="Voltar ao topo"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></a>
+<script>
+(function(){
+  var links=[].slice.call(document.querySelectorAll('.toc a'));
+  var secs=links.map(function(a){return document.querySelector(a.getAttribute('href'));}).filter(Boolean);
+  function onScroll(){
+    var y=window.scrollY+120,cur=null;
+    for(var i=0;i<secs.length;i++){ if(secs[i].offsetTop<=y) cur=secs[i]; }
+    links.forEach(function(a){ a.classList.toggle('active', cur && a.getAttribute('href')==='#'+cur.id); });
+  }
+  window.addEventListener('scroll',onScroll,{passive:true});
+  onScroll();
+})();
+</script>
+</body>
+</html>

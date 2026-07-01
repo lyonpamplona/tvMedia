@@ -93,6 +93,72 @@ def now_in_timezone(tz_name: str) -> datetime:
     return datetime.now(tz)
 
 
+def build_cues_payload(
+    media: models.Media,
+    base_url: str | None = None,
+    db: Session | None = None,
+) -> list[schemas.DisplayCue]:
+    """Converte os cue points (L3/L5) de uma midia em itens para o player.
+
+    Apenas cues habilitados sao emitidos, ja ordenados por ``at_seconds``. O
+    player escuta o ``timeupdate`` do video e dispara cada cue no instante certo.
+
+    Para cues de **ad-break** (L5, ``action == "ad_break"``) com ``target_id``,
+    resolve a midia de anuncio referenciada e injeta sua ``url``/``poster`` e o
+    tipo real em ``kind``, para o player exibir o anuncio em tela cheia. Exige
+    ``base_url`` e ``db`` para montar a URL absoluta da midia.
+    """
+    cues = getattr(media, "cues", None) or []
+    payload: list[schemas.DisplayCue] = []
+    for cue in sorted(cues, key=lambda c: c.at_seconds):
+        if not getattr(cue, "enabled", True):
+            continue
+        kind = cue.kind
+        anchor = cue.anchor
+        url: str | None = None
+        poster: str | None = None
+        if cue.action == "ad_break" and cue.target_id and db is not None:
+            ad = crud.get_media(db, cue.target_id)
+            if ad is not None:
+                kind = getattr(ad.type, "value", str(ad.type))
+                url = media_url(base_url or "", ad)
+                if getattr(ad, "poster_path", None) and base_url:
+                    poster = base_url + f"media/{ad.poster_path}"
+                # Anuncio ocupa a tela inteira por padrao.
+                if anchor in ("", "lower_third"):
+                    anchor = "fullscreen"
+        payload.append(
+            schemas.DisplayCue(
+                at_seconds=cue.at_seconds,
+                action=cue.action,
+                kind=kind,
+                content=cue.content,
+                target_id=cue.target_id,
+                slot_id=cue.slot_id,
+                anchor=anchor,
+                enter_anim=cue.enter_anim,
+                exit_anim=cue.exit_anim,
+                duration=cue.duration,
+                url=url,
+                poster=poster,
+            )
+        )
+    return payload
+
+
+def _zone_style(zone: models.Zone) -> dict:
+    """Campos de customizacao visual de uma zona para o payload do player."""
+    return dict(
+        bg_color=getattr(zone, "bg_color", None),
+        opacity=getattr(zone, "opacity", 1.0),
+        radius=getattr(zone, "radius", 0.0),
+        padding=getattr(zone, "padding", 0.0),
+        border_width=getattr(zone, "border_width", 0.0),
+        border_color=getattr(zone, "border_color", None),
+        font_family=getattr(zone, "font_family", None),
+    )
+
+
 def build_zone_payload(
     base_url: str, db: Session, zone: models.Zone, now: datetime
 ) -> schemas.DisplayZone:
@@ -126,6 +192,7 @@ def build_zone_payload(
                     url=resolved_url,
                     poster=poster_url,
                     content=item.media.content,
+                    cues=build_cues_payload(item.media, base_url, db),
                 )
             )
 
@@ -137,6 +204,7 @@ def build_zone_payload(
         width=zone.width,
         height=zone.height,
         z_index=zone.z_index,
+        **_zone_style(zone),
         playlist_name=playlist.name if playlist else None,
         items=items,
     )
@@ -185,7 +253,16 @@ def _campaign_is_active(
 
 
 def _choose_campaign(campaigns: list[models.Campaign], now: datetime) -> models.Campaign | None:
-    """Escolhe campanha por prioridade e alterna empatadas em ciclos de 10 min."""
+    """Escolhe a campanha ativa por prioridade, com rotacao ponderada (L5).
+
+    A campanha de maior ``priority`` vence. Havendo empate, aplica-se uma
+    **rotacao ponderada**: cada campanha entra na roda ``weight`` vezes e o ciclo
+    de 10 minutos (``now.minute // 10``) seleciona a posicao. Assim, pesos
+    maiores aparecem proporcionalmente mais, de forma deterministica (igual em
+    todas as telas, sem aleatoriedade). Peso 0 remove a campanha do rodizio
+    quando ha outras com peso; se todas tiverem peso 0, cai numa alternancia
+    simples.
+    """
     if not campaigns:
         return None
     campaigns = sorted(campaigns, key=lambda c: (c.priority, c.id), reverse=True)
@@ -193,7 +270,13 @@ def _choose_campaign(campaigns: list[models.Campaign], now: datetime) -> models.
     top = [c for c in campaigns if c.priority == top_priority]
     if len(top) == 1:
         return top[0]
-    return top[(now.minute // 10) % len(top)]
+    wheel: list[models.Campaign] = []
+    for campaign in top:
+        weight = max(0, int(getattr(campaign, "weight", 1) or 0))
+        wheel.extend([campaign] * weight)
+    if not wheel:
+        wheel = top  # todas com peso 0: volta a alternancia simples
+    return wheel[(now.minute // 10) % len(wheel)]
 
 
 def _effective_playlist_for_zone(
@@ -277,6 +360,7 @@ def build_zone_payload_for_screen(
                     url=resolved_url,
                     poster=poster_url,
                     content=item.media.content,
+                    cues=build_cues_payload(item.media, base_url, db),
                 )
             )
 
@@ -291,6 +375,7 @@ def build_zone_payload_for_screen(
         width=zone.width,
         height=zone.height,
         z_index=zone.z_index,
+        **_zone_style(zone),
         playlist_name=playlist_name,
         items=items,
     )
@@ -317,6 +402,8 @@ def _screen_theme(screen: models.Screen) -> dict | None:
         value = getattr(screen, attr, None)
         if value:
             theme[key] = value
+    if getattr(screen, "theme_font", None):
+        theme["font"] = screen.theme_font
     return theme or None
 
 
@@ -341,9 +428,72 @@ def build_overlays_payload(screen: models.Screen) -> list[schemas.DisplayOverlay
                 visible_seconds=overlay.visible_seconds,
                 opacity=overlay.opacity,
                 z_index=overlay.z_index,
+                # L1 - Live Graphics: posicionamento, animacao e janela de tempo.
+                # `getattr` com fallback garante compatibilidade com bancos
+                # antigos cujas colunas ainda nao migraram.
+                anchor=getattr(overlay, "anchor", "") or "",
+                margin=getattr(overlay, "margin", 2.0) or 0.0,
+                enter_anim=getattr(overlay, "enter_anim", "fade") or "fade",
+                exit_anim=getattr(overlay, "exit_anim", "fade") or "fade",
+                enter_at=getattr(overlay, "enter_at", 0.0) or 0.0,
+                duration=getattr(overlay, "duration", 0.0) or 0.0,
+                repeat_every=getattr(overlay, "repeat_every", 0.0) or 0.0,
             )
         )
     return items
+
+
+def build_ad_breaks_payload(
+    base_url: str, db: Session, screen: models.Screen
+) -> list[schemas.DisplayAdBreak]:
+    """Resolve os ad-breaks recorrentes/agendados (L6) aplicaveis a uma tela.
+
+    Para cada agendamento habilitado que vale para a tela, resolve a midia do
+    anuncio (URL/poster/tipo) e emite os parametros de recorrencia. O disparo em
+    si acontece no ``player.js`` por relogio de parede; aqui apenas entregamos a
+    "agenda" ja resolvida. Agendamentos sem midia valida sao ignorados.
+    """
+    out: list[schemas.DisplayAdBreak] = []
+    for sched in crud.list_ad_breaks_for_screen(db, screen):
+        if not sched.media_id:
+            continue
+        ad = crud.get_media(db, sched.media_id)
+        if ad is None:
+            continue
+        url = media_url(base_url or "", ad)
+        if not url:
+            continue
+        poster = None
+        if getattr(ad, "poster_path", None) and base_url:
+            poster = base_url + f"media/{ad.poster_path}"
+        out.append(
+            schemas.DisplayAdBreak(
+                name=sched.name,
+                media_id=sched.media_id,
+                kind=getattr(ad.type, "value", str(ad.type)),
+                url=url,
+                poster=poster,
+                every_minutes=sched.every_minutes,
+                duration_seconds=sched.duration_seconds,
+                start_time=sched.start_time,
+                end_time=sched.end_time,
+                days=sched.days,
+                enter_anim=sched.enter_anim,
+                exit_anim=sched.exit_anim,
+            )
+        )
+    return out
+
+
+def _screen_background(base_url: str, db: Session, screen: models.Screen) -> dict | None:
+    """Fundo da tela: cor (tema), imagem (midia) ou transparente."""
+    mode = getattr(screen, "background_mode", "color") or "color"
+    bg: dict = {"mode": mode, "fit": getattr(screen, "background_fit", "cover") or "cover"}
+    if mode == "image" and getattr(screen, "background_image_id", None):
+        media = crud.get_media(db, screen.background_image_id)
+        if media is not None:
+            bg["image"] = media_url(base_url, media)
+    return bg
 
 
 def build_display_payload(
@@ -365,6 +515,7 @@ def build_display_payload(
             screen=screen.slug,
             revision="",
             theme=_screen_theme(screen),
+            background=_screen_background(base_url, db, screen),
             zones=[],
             overlays=[],
             background_audio=None,
@@ -390,8 +541,10 @@ def build_display_payload(
         screen=screen.slug,
         revision="",
         theme=_screen_theme(screen),
+        background=_screen_background(base_url, db, screen),
         zones=zones,
         overlays=build_overlays_payload(screen),
+        ad_breaks=build_ad_breaks_payload(base_url, db, screen),
         background_audio=background_audio,
         emergency_message=emergency_message,
     )

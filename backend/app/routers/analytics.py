@@ -63,6 +63,26 @@ def proof_of_play(
     )
 
 
+@router.get("/proof-of-play/ads", response_model=list[schemas.ProofOfPlayRow])
+def proof_of_play_ads(
+    days: int = Query(7, ge=1, le=365),
+    screen: str | None = Query(None, description="Filtra por slug de tela."),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    scope: Scope = Depends(get_scope),
+) -> list[schemas.ProofOfPlayRow]:
+    """Relatorio de exibicao de anuncios (L5): agrega apenas eventos de ad-break."""
+    _validate_screen_slug(db, screen, scope)
+    return crud.proof_of_play(
+        db,
+        since=_since(days),
+        screen_slug=screen,
+        company_id=scope.company_id,
+        limit=limit,
+        only_ads=True,
+    )
+
+
 @router.get("/proof-of-play/summary", response_model=schemas.ProofOfPlaySummary)
 def proof_of_play_summary(
     days: int = Query(7, ge=1, le=365),

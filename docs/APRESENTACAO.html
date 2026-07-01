@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>tvMedia Studio - Documentacao completa</title>
+  <meta name="description" content="Apresentacao tecnica completa do tvMedia Studio: arquitetura, API, comandos, configuracao, uso e roadmap." />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f121a;
+      --surface: #171b26;
+      --surface-2: #202637;
+      --line: rgba(238, 244, 255, .13);
+      --text: #eef4ff;
+      --muted: #aeb9d3;
+      --green: #15c8a8;
+      --blue: #4f8cff;
+      --gold: #f4c95d;
+      --danger: #ff6b7a;
+      font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--bg); color: var(--text); }
+    a { color: var(--green); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre { font-family: "Cascadia Code", Consolas, monospace; }
+    pre { overflow: auto; background: #0a0d13; border: 1px solid var(--line); border-radius: 8px; padding: 14px; color: #dbe7ff; }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0 24px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 11px 10px; text-align: left; vertical-align: top; }
+    th { color: var(--text); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
+    td { color: var(--muted); }
+    .layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 100vh; }
+    aside { position: sticky; top: 0; height: 100vh; overflow: auto; padding: 24px; border-right: 1px solid var(--line); background: rgba(15,18,26,.96); }
+    main { min-width: 0; }
+    .mark { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+    .mark img { width: 52px; height: 52px; }
+    .mark strong { display: block; font-size: 18px; }
+    .mark span { color: var(--muted); font-size: 12px; }
+    nav a { display: block; color: var(--muted); padding: 8px 0; font-size: 14px; }
+    nav a:hover { color: var(--text); }
+    .hero { min-height: 78vh; display: grid; align-items: center; padding: 64px min(7vw, 88px); border-bottom: 1px solid var(--line); }
+    .hero-grid { display: grid; grid-template-columns: 1fr .9fr; gap: 46px; align-items: center; }
+    .eyebrow { color: var(--green); font-weight: 700; text-transform: uppercase; letter-spacing: .12em; font-size: 13px; }
+    h1 { font-size: clamp(44px, 7vw, 94px); line-height: .93; letter-spacing: 0; margin: 14px 0 22px; }
+    h2 { font-size: clamp(28px, 4vw, 48px); margin: 0 0 16px; letter-spacing: 0; }
+    h3 { font-size: 20px; margin: 24px 0 10px; }
+    p { color: var(--muted); line-height: 1.72; font-size: 17px; }
+    .hero p { font-size: 19px; max-width: 760px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+    .chip { border: 1px solid var(--line); padding: 9px 12px; border-radius: 999px; color: var(--text); background: rgba(255,255,255,.04); }
+    .preview { background: #0a0d13; border: 1px solid var(--line); border-radius: 18px; padding: 18px; box-shadow: 0 24px 70px rgba(0,0,0,.32); }
+    .preview-bar { display: flex; gap: 8px; margin-bottom: 14px; }
+    .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--green); animation: pulse 1.8s infinite; }
+    .dot:nth-child(2) { background: var(--blue); animation-delay: .2s; }
+    .dot:nth-child(3) { background: var(--gold); animation-delay: .4s; }
+    .screen { display: grid; grid-template-columns: 1.4fr .8fr; gap: 12px; min-height: 360px; }
+    .tile { border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 18px; background: linear-gradient(135deg, rgba(21,200,168,.22), rgba(79,140,255,.14)); position: relative; overflow: hidden; }
+    .tile::after { content: ""; position: absolute; inset: auto -20% -30% 20%; height: 140px; background: rgba(244,201,93,.23); filter: blur(28px); animation: float 5s ease-in-out infinite; }
+    .side { display: grid; gap: 12px; }
+    section { padding: 58px min(7vw, 88px); border-bottom: 1px solid var(--line); }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+    .card b { color: var(--text); display: block; margin-bottom: 8px; }
+    .card span, li { color: var(--muted); line-height: 1.65; }
+    .flow { counter-reset: step; display: grid; gap: 12px; }
+    .step { counter-increment: step; display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-items: start; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+    .step::before { content: counter(step); display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--blue); color: white; font-weight: 800; }
+    .warn { border-left: 4px solid var(--gold); background: rgba(244,201,93,.08); padding: 14px 16px; border-radius: 8px; color: var(--muted); }
+    .danger { border-left-color: var(--danger); background: rgba(255,107,122,.08); }
+    @keyframes pulse { 0%,100% { transform: scale(.72); opacity: .55; } 50% { transform: scale(1); opacity: 1; } }
+    @keyframes float { 0%,100% { transform: translateX(-12px); } 50% { transform: translateX(26px); } }
+    @media (max-width: 980px) {
+      .layout { display: block; }
+      aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 18px; }
+      .hero-grid, .grid-2, .grid-3, .screen { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <div class="mark">
+        <img src="assets/tvmedia-signal.svg" alt="tvMedia signal" />
+        <div><strong>tvMedia Studio</strong><span>Documentacao completa v35</span></div>
+      </div>
+      <nav aria-label="Sumario">
+        <a href="#visao">Visao geral</a>
+        <a href="#recursos">Recursos</a>
+        <a href="#arquitetura">Arquitetura</a>
+        <a href="#fluxos">Fluxos do sistema</a>
+        <a href="#modulos">Modulos</a>
+        <a href="#api">API tecnica</a>
+        <a href="#config">Configuracao</a>
+        <a href="#uso">Como usar</a>
+        <a href="#comandos">Comandos</a>
+        <a href="#seguranca">Seguranca</a>
+        <a href="#auditoria">Auditoria</a>
+        <a href="#roadmap">Roadmap corretivo</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="hero" id="visao">
+        <div class="hero-grid">
+          <div>
+            <div class="eyebrow">CMS autohospedado para sinalizacao digital</div>
+            <h1>tvMedia Studio</h1>
+            <p>Controle telas, midias, playlists, campanhas, DataSets, widgets e proof-of-play em um unico sistema FastAPI com painel web e player para TVs em tempo real.</p>
+            <div class="chips">
+              <span class="chip">FastAPI</span>
+              <span class="chip">SQLAlchemy</span>
+              <span class="chip">WebSocket</span>
+              <span class="chip">PWA sem build</span>
+              <span class="chip">2FA TOTP</span>
+              <span class="chip">Backups SQLite</span>
+            </div>
+          </div>
+          <div class="preview" aria-label="Preview visual do player">
+            <div class="preview-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+            <div class="screen">
+              <div class="tile"><h3>Zona principal</h3><p>Videos, imagens, HTML, campanhas e playlists resolvidas pelo CMS.</p></div>
+              <div class="side">
+                <div class="tile"><b>Widgets</b><p>RSS, clima, QR, stocks, menu board e DataSets.</p></div>
+                <div class="tile"><b>BI</b><p>Proof-of-play, CSV e relatorios por e-mail.</p></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section id="recursos">
+        <h2>Recursos do Sistema</h2>
+        <div class="grid-3">
+          <div class="card"><b>Studio Admin</b><span>Editor visual para midias, playlists, telas, zonas, overlays, agendas, campanhas, DataSets, BI, usuarios, auditoria e plataforma.</span></div>
+          <div class="card"><b>Player TV</b><span>Aplicacao fullscreen que consome `/api/display/{slug}`, conecta via WebSocket e atualiza quando a revisao muda.</span></div>
+          <div class="card"><b>Operacao</b><span>Healthcheck, alertas offline, comandos de tela, screenshot best-effort, backups e relatorios agendados.</span></div>
+          <div class="card"><b>Seguranca</b><span>Usuarios, papeis, multiempresa, super admin, 2FA TOTP, tokens Bearer, rate-limit e validacao de segredos em producao.</span></div>
+          <div class="card"><b>Conteudo dinamico</b><span>DataSets manuais, CSV e JSON remoto, widgets de noticias, cotacoes, relogio, calendario, menu board e stocks.</span></div>
+          <div class="card"><b>BI</b><span>Proof-of-play com resumo, detalhes, exportacao CSV e envio por SMTP com anexo PDF textual.</span></div>
+        </div>
+      </section>
+
+      <section id="arquitetura">
+        <h2>Arquitetura</h2>
+        <p>O backend FastAPI centraliza API, WebSocket, tarefas em background, persistencia e frontend estatico. O player e independente, publico por slug, e recebe um payload ja resolvido pelo servidor.</p>
+        <pre><code>Admin Web -> REST autenticado -> FastAPI -> SQLAlchemy -> SQLite/PostgreSQL
+Player TV -> GET /api/display/{slug}
+Player TV -> WS /ws/display/{slug}
+FastAPI lifespan -> backup_scheduler + offline_alert_scheduler + report_scheduler</code></pre>
+        <table>
+          <thead><tr><th>Camada</th><th>Responsabilidade</th></tr></thead>
+          <tbody>
+            <tr><td>Backend</td><td>API REST, auth, modelos, regras de negocio, payload do player, BI, backups e WebSocket.</td></tr>
+            <tr><td>Admin</td><td>Painel PWA sem build para configurar todo o CMS.</td></tr>
+            <tr><td>Player</td><td>Renderizacao fullscreen das zonas, midias, widgets, comandos e eventos de exibicao.</td></tr>
+            <tr><td>Infra</td><td>Docker Compose, `.env`, healthcheck, volume persistente e CI GitHub Actions.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="fluxos">
+        <h2>Fluxos do Sistema</h2>
+        <div class="grid-2">
+          <div class="card">
+            <b>Conteudo ate a TV</b>
+            <div class="flow">
+              <div class="step">Criar midia no admin.</div>
+              <div class="step">Adicionar midia a playlist.</div>
+              <div class="step">Vincular playlist a zona, agenda ou campanha.</div>
+              <div class="step">Player busca payload e renderiza.</div>
+            </div>
+          </div>
+          <div class="card">
+            <b>Tempo real</b>
+            <div class="flow">
+              <div class="step">Player conecta no WebSocket da tela.</div>
+              <div class="step">Admin altera conteudo.</div>
+              <div class="step">Backend envia `reload`.</div>
+              <div class="step">Player recarrega se a `revision` mudou.</div>
+            </div>
+          </div>
+        </div>
+        <h3>Outros fluxos cobertos</h3>
+        <ul>
+          <li>Login, 2FA, sessao HMAC e API tokens.</li>
+          <li>Agendamento por fuso, prioridade e playlist padrao.</li>
+          <li>Campanhas com alvo por tela, grupo ou zona e limite por hora.</li>
+          <li>Proof-of-play, CSV, relatorios agendados e coleta seletiva.</li>
+          <li>Backups automaticos/manual e download administrativo.</li>
+        </ul>
+      </section>
+
+      <section id="modulos">
+        <h2>Modulos Principais</h2>
+        <table>
+          <thead><tr><th>Arquivo</th><th>Papel</th></tr></thead>
+          <tbody>
+            <tr><td>`backend/app/main.py`</td><td>FastAPI, routers, CORS, headers, static files e lifespan.</td></tr>
+            <tr><td>`backend/app/config.py`</td><td>Variaveis, seguranca, CORS, SMTP, backup e BI.</td></tr>
+            <tr><td>`backend/app/models.py`</td><td>ORM: Company, User, ApiToken, Media, Playlist, Screen, Campaign, DataSet, BI.</td></tr>
+            <tr><td>`backend/app/schemas.py`</td><td>Contratos Pydantic da API e do player.</td></tr>
+            <tr><td>`backend/app/crud.py`</td><td>Persistencia e regras de consulta.</td></tr>
+            <tr><td>`backend/app/services.py`</td><td>Payload final do player.</td></tr>
+            <tr><td>`frontend/admin/app.js`</td><td>Studio admin completo.</td></tr>
+            <tr><td>`frontend/player/player.js`</td><td>Motor de exibicao das TVs.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="api">
+        <h2>API Tecnica</h2>
+        <p>Rotas administrativas usam `Authorization: Bearer`. O Bearer pode ser token de sessao ou token pessoal `tvma_...`.</p>
+        <table>
+          <thead><tr><th>Familia</th><th>Rotas</th></tr></thead>
+          <tbody>
+            <tr><td>Auth</td><td>`/api/auth/login`, `/me`, `/change-password`, `/logout`, `/2fa/*`, `/api-tokens`</td></tr>
+            <tr><td>Midias</td><td>`/api/media`, `/upload`, `/bulk`, `/bulk-tags`, `/import-url`, `/purge-unused`</td></tr>
+            <tr><td>Playlists</td><td>`/api/playlists`, `/items`, `/reorder`, `/import`, `/export`, `/folders`</td></tr>
+            <tr><td>Telas</td><td>`/api/screens`, `/publish`, `/layout-lock`, `/commands`, `/screenshot`, `/map`</td></tr>
+            <tr><td>Display publico</td><td>`/api/display/{slug}`, `/api/display/{slug}/events`, `WS /ws/display/{slug}`</td></tr>
+            <tr><td>Dados</td><td>`/api/datasets`, `/api/widgets/news`, `/rates`, `/stocks`, `/datasets/{id}`</td></tr>
+            <tr><td>Analytics</td><td>`/api/analytics/proof-of-play/*`, `/reports`, `/screens/health`</td></tr>
+            <tr><td>Sistema</td><td>`/api/system/backup`, `/api/system/backups`</td></tr>
+          </tbody>
+        </table>
+        <pre><code>curl -H "Authorization: Bearer SEU_TOKEN" http://localhost:8000/api/media
+curl http://localhost:8000/api/display/SLUG_DA_TELA</code></pre>
+      </section>
+
+      <section id="config">
+        <h2>Configuracao e Dependencias</h2>
+        <div class="grid-2">
+          <div class="card"><b>Dependencias</b><span>Python 3.12+, FastAPI, SQLAlchemy, Pydantic, Uvicorn, requests, python-multipart, Alembic, Pillow opcional, ffmpeg/ffprobe opcional.</span></div>
+          <div class="card"><b>Ambiente</b><span>Configure `.env`, use `ENVIRONMENT=production`, troque `SECRET_KEY`, troque `ADMIN_PASSWORD` e restrinja `CORS_ORIGINS`.</span></div>
+        </div>
+        <table>
+          <thead><tr><th>Variavel</th><th>Uso</th></tr></thead>
+          <tbody>
+            <tr><td>`DATABASE_URL`</td><td>SQLite por padrao ou PostgreSQL em producao.</td></tr>
+            <tr><td>`MEDIA_DIR`</td><td>Pasta persistente das midias.</td></tr>
+            <tr><td>`FORCE_HTTPS`</td><td>Redirect HTTPS atras de proxy confiavel.</td></tr>
+            <tr><td>`BACKUP_*`</td><td>Backup automatico SQLite e retencao.</td></tr>
+            <tr><td>`SMTP_*`</td><td>Alertas e relatorios por e-mail.</td></tr>
+            <tr><td>`REPORT_SCHEDULER_*`</td><td>Agendador de BI.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="uso">
+        <h2>Como Usar</h2>
+        <div class="flow">
+          <div class="step">Copie `.env.example` para `.env` e ajuste segredos.</div>
+          <div class="step">Suba com `docker compose up --build -d`.</div>
+          <div class="step">Acesse `/admin/` e faca login.</div>
+          <div class="step">Crie midias e uma playlist.</div>
+          <div class="step">Crie uma tela, configure a zona principal e copie a URL do player.</div>
+          <div class="step">Abra `/player/?screen=SLUG` na TV em modo kiosk.</div>
+          <div class="step">Use BI, campanhas, DataSets, 2FA e backups conforme a operacao crescer.</div>
+        </div>
+      </section>
+
+      <section id="comandos">
+        <h2>Comandos</h2>
+        <h3>Docker</h3>
+        <pre><code>cp .env.example .env
+docker compose up --build -d
+docker compose logs -f app
+docker compose down</code></pre>
+        <h3>Desenvolvimento local</h3>
+        <pre><code>cd backend
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</code></pre>
+        <h3>Validacao</h3>
+        <pre><code>python -m compileall -q backend\app
+node --check frontend\admin\app.js
+node --check frontend\player\player.js
+python -m pytest</code></pre>
+        <h3>Backup via API</h3>
+        <pre><code>$token = "COLE_O_TOKEN"
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/system/backup -Headers @{ Authorization = "Bearer $token" }</code></pre>
+      </section>
+
+      <section id="seguranca">
+        <h2>Seguranca</h2>
+        <div class="grid-2">
+          <div class="card"><b>Ja existe</b><span>2FA TOTP, hash PBKDF2, token HMAC, rate-limit de login, validacao de segredos em producao, headers basicos e API tokens revogaveis.</span></div>
+          <div class="card"><b>Proximo hardening</b><span>Aplicar escopos reais em API tokens, adicionar CSP, proteger SSRF e fortalecer politica de display publico.</span></div>
+        </div>
+        <p class="warn">Para producao publica: use HTTPS via proxy, `ENVIRONMENT=production`, `API_DOCS_ENABLED=false`, segredos fortes e CORS restrito.</p>
+      </section>
+
+      <section id="auditoria">
+        <h2>Auditoria da Varredura</h2>
+        <table>
+          <thead><tr><th>Check</th><th>Resultado</th></tr></thead>
+          <tbody>
+            <tr><td>Compile backend</td><td>OK</td></tr>
+            <tr><td>Node check admin</td><td>OK</td></tr>
+            <tr><td>Node check player</td><td>OK</td></tr>
+            <tr><td>Pytest</td><td>7 passed, 11 skipped</td></tr>
+          </tbody>
+        </table>
+        <div class="warn danger">Achados ativos: escopos de API token ainda nao aplicados, URLs remotas sem protecao SSRF, CSP ausente, testes de API ainda pequenos e Git local apontando para `C:/Users/lyon`.</div>
+      </section>
+
+      <section id="roadmap">
+        <h2>Roadmap Corretivo</h2>
+        <div class="grid-2">
+          <div class="card"><b>R1 - Seguranca de integracoes</b><span>Aplicar scopes por rota e testar tokens `read`, `write`, `admin`, `analytics` e `system`.</span></div>
+          <div class="card"><b>R2 - Anti-SSRF</b><span>Bloquear localhost, redes privadas, link-local e metadata services em fetches remotos.</span></div>
+          <div class="card"><b>R3 - CSP</b><span>Criar politica por admin/player sem quebrar embeds e HTML administrado.</span></div>
+          <div class="card"><b>R4 - Alembic real</b><span>Gerar revisao do schema v35 e documentar upgrade.</span></div>
+          <div class="card"><b>R5 - Testes de API</b><span>TestClient com SQLite temporario cobrindo fluxos reais.</span></div>
+          <div class="card"><b>R6 - Modularizacao do admin</b><span>Separar API, estado, renderizadores e modais em ES modules.</span></div>
+        </div>
+        <p>Documentos completos: <a href="README.md">indice de docs</a>, <a href="ARQUITETURA.md">arquitetura</a>, <a href="API_TECNICA.md">API tecnica</a>, <a href="AUDITORIA_CODIGO.md">auditoria</a> e <a href="ROADMAP_CORRETIVO.md">roadmap corretivo</a>.</p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

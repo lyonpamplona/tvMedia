@@ -178,6 +178,15 @@ class Settings:
             os.getenv("REPORT_SCHEDULER_CHECK_SECONDS", "300")
         )
 
+        # Retencao automatica de proof-of-play (0 desativa) e metricas.
+        self.play_events_retention_days: int = int(
+            os.getenv("PLAY_EVENTS_RETENTION_DAYS", "0")
+        )
+        self.retention_check_hours: int = int(
+            os.getenv("RETENTION_CHECK_HOURS", "24")
+        )
+        self.metrics_enabled: bool = _env_bool("METRICS_ENABLED", True)
+
         # Garante que os diretórios necessários existam.
         self.media_dir.mkdir(parents=True, exist_ok=True)
         (BASE_DIR / "data").mkdir(parents=True, exist_ok=True)

@@ -1202,6 +1202,10 @@ def update_screen(
         "theme_accent",
         "theme_ticker_bg",
         "theme_ticker_text",
+        "theme_font",
+        "background_mode",
+        "background_image_id",
+        "background_fit",
     ):
         if _theme_field in data.model_fields_set:
             setattr(screen, _theme_field, getattr(data, _theme_field))
@@ -1364,6 +1368,7 @@ def create_campaign(
         start_at=data.start_at,
         end_at=data.end_at,
         priority=data.priority,
+        weight=getattr(data, "weight", 1),
         enabled=data.enabled,
         max_plays_per_hour=data.max_plays_per_hour,
         company_id=company_id,
@@ -1396,6 +1401,8 @@ def update_campaign(
         campaign.end_at = data.end_at
     if data.priority is not None:
         campaign.priority = data.priority
+    if getattr(data, "weight", None) is not None:
+        campaign.weight = data.weight
     if data.enabled is not None:
         campaign.enabled = data.enabled
     if "max_plays_per_hour" in data.model_fields_set:
@@ -1579,6 +1586,132 @@ def delete_zone(db: Session, zone: models.Zone) -> None:
     db.commit()
 
 
+# --------------------------------------------------------------------------- #
+# Cue points sincronizados ao video (L3)
+# --------------------------------------------------------------------------- #
+def list_media_cues(db: Session, media_id: int) -> list[models.MediaCue]:
+    """Lista os cue points de uma midia, ordenados pelo instante de disparo."""
+    return (
+        db.query(models.MediaCue)
+        .filter(models.MediaCue.media_id == media_id)
+        .order_by(models.MediaCue.at_seconds)
+        .all()
+    )
+
+
+def get_media_cue(db: Session, cue_id: int) -> models.MediaCue | None:
+    """Busca um cue point pelo id."""
+    return db.get(models.MediaCue, cue_id)
+
+
+def create_media_cue(
+    db: Session, media: models.Media, data: schemas.MediaCueCreate
+) -> models.MediaCue:
+    """Cria um cue point vinculado a uma midia."""
+    cue = models.MediaCue(media_id=media.id, **data.model_dump())
+    db.add(cue)
+    db.commit()
+    db.refresh(cue)
+    return cue
+
+
+def update_media_cue(
+    db: Session, cue: models.MediaCue, data: schemas.MediaCueUpdate
+) -> models.MediaCue:
+    """Atualiza os campos informados de um cue point."""
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(cue, field, value)
+    db.commit()
+    db.refresh(cue)
+    return cue
+
+
+def delete_media_cue(db: Session, cue: models.MediaCue) -> None:
+    """Remove um cue point."""
+    db.delete(cue)
+    db.commit()
+
+
+# --------------------------------------------------------------------------- #
+# Ad-breaks recorrentes/agendados (L6)
+# --------------------------------------------------------------------------- #
+def list_ad_break_schedules(
+    db: Session, *, company_id: int | None = None
+) -> list[models.AdBreakSchedule]:
+    """Lista os ad-breaks agendados, opcionalmente filtrando por empresa."""
+    query = db.query(models.AdBreakSchedule)
+    if company_id is not None:
+        query = query.filter(models.AdBreakSchedule.company_id == company_id)
+    return query.order_by(models.AdBreakSchedule.name).all()
+
+
+def get_ad_break_schedule(
+    db: Session, sched_id: int
+) -> models.AdBreakSchedule | None:
+    """Busca um ad-break agendado pelo id."""
+    return db.get(models.AdBreakSchedule, sched_id)
+
+
+def create_ad_break_schedule(
+    db: Session, *, company_id: int | None, data: schemas.AdBreakScheduleCreate
+) -> models.AdBreakSchedule:
+    """Cria um ad-break recorrente/agendado."""
+    sched = models.AdBreakSchedule(company_id=company_id, **data.model_dump())
+    db.add(sched)
+    db.commit()
+    db.refresh(sched)
+    return sched
+
+
+def update_ad_break_schedule(
+    db: Session,
+    sched: models.AdBreakSchedule,
+    data: schemas.AdBreakScheduleUpdate,
+) -> models.AdBreakSchedule:
+    """Atualiza os campos informados de um ad-break agendado."""
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(sched, field, value)
+    db.commit()
+    db.refresh(sched)
+    return sched
+
+
+def delete_ad_break_schedule(
+    db: Session, sched: models.AdBreakSchedule
+) -> None:
+    """Remove um ad-break agendado."""
+    db.delete(sched)
+    db.commit()
+
+
+def list_ad_breaks_for_screen(
+    db: Session, screen: models.Screen
+) -> list[models.AdBreakSchedule]:
+    """Retorna os ad-breaks habilitados que se aplicam a uma tela.
+
+    Um ad-break aplica-se quando esta habilitado, pertence a mesma empresa da
+    tela (ou e global, ``company_id`` nulo) e ou nao tem tela alvo (vale para
+    todas) ou aponta exatamente para esta tela.
+    """
+    rows = (
+        db.query(models.AdBreakSchedule)
+        .filter(models.AdBreakSchedule.enabled.is_(True))
+        .all()
+    )
+    out: list[models.AdBreakSchedule] = []
+    for sched in rows:
+        if (
+            sched.company_id is not None
+            and screen.company_id is not None
+            and sched.company_id != screen.company_id
+        ):
+            continue
+        if sched.screen_id is not None and sched.screen_id != screen.id:
+            continue
+        out.append(sched)
+    return out
+
+
 def get_overlay(db: Session, overlay_id: int) -> models.Overlay | None:
     """Busca um overlay por ID."""
     return db.scalar(select(models.Overlay).where(models.Overlay.id == overlay_id))
@@ -1725,6 +1858,7 @@ def record_play_events(
             media_name=event.media_name,
             media_type=event.media_type,
             duration_seconds=event.duration_seconds,
+            is_ad=getattr(event, "is_ad", False),
         )
         for event in filtered
     ]
@@ -1742,8 +1876,12 @@ def proof_of_play(
     screen_slug: str | None = None,
     company_id: int | None = None,
     limit: int = 100,
+    only_ads: bool = False,
 ) -> list[schemas.ProofOfPlayRow]:
     """Agrega eventos de reprodução por mídia (contagem e tempo total).
+
+    Quando ``only_ads`` é verdadeiro, considera apenas eventos de ad-break (L5),
+    servindo de base para o relatório de exibição de anúncios.
 
     Quando ``company_id`` é informado, considera apenas os eventos daquela
     empresa (segmentação multiempresa do proof-of-play).
@@ -1762,6 +1900,8 @@ def proof_of_play(
         stmt = stmt.where(models.PlayEvent.screen_slug == screen_slug)
     if company_id is not None:
         stmt = stmt.where(models.PlayEvent.company_id == company_id)
+    if only_ads:
+        stmt = stmt.where(models.PlayEvent.is_ad.is_(True))
     stmt = (
         stmt.group_by(models.PlayEvent.media_id, models.PlayEvent.media_name)
         .order_by(func.count().desc())
